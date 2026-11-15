@@ -1,0 +1,206 @@
+/*
+ * FitMax skins. A skin sets type, shape and colour; mode (light/dark) is separate.
+ *   <html data-skin="studio|doodle|retro|glass|editorial|swiss" data-theme="light|dark">
+ * Every component reads the same variables, so a skin never needs per-screen CSS.
+ */
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/space-grotesk';
+@import '@fontsource-variable/jetbrains-mono';
+@import '@fontsource-variable/fraunces';
+@import '@fontsource/caveat/600.css';
+@import '@fontsource/caveat/700.css';
+@import '@fontsource/kalam/400.css';
+@import '@fontsource/kalam/700.css';
+@import '@fontsource/vt323';
+
+:root {
+  --font: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Space Grotesk Variable', var(--font);
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius: 18px;
+  --radius-sm: 12px;
+  --bw: 1px; /* border width */
+  --card-bg: var(--surface);
+  --card-shadow: none;
+  --page-bg: var(--bg);
+  --display-weight: 650;
+  --label-case: none;
+  --label-spacing: 0;
+  --blur: none;
+}
+
+/* ---------------------------------------------------------------- Studio (default) */
+/* Quiet neutrals, hairlines, one warm accent. No shadows: depth comes from tone. */
+[data-skin='studio'][data-theme='dark'],
+html:not([data-skin])[data-theme='dark'] {
+  --bg: #09090b; --surface: #131316; --surface-2: #1b1b1f; --surface-3: #26262b; --border: #232328;
+  --text: #f4f4f5; --muted: #8c8c96; --accent: #ff6a2b; --accent-2: #ff8650; --accent-ink: #0b0b0d; --accent-soft: rgb(255 106 43 / 0.13);
+  --good: #3ddc84; --good-soft: rgb(61 220 132 / 0.13); --data: #5b9dff; --data-soft: rgb(91 157 255 / 0.13);
+  --warn: #ffbf3c; --warn-soft: rgb(255 191 60 / 0.14); --danger: #ff4d6a; --teal: #2dd4bf; --violet: #a78bfa; --pink: #f472b6;
+  --shadow: none;
+}
+[data-skin='studio'][data-theme='light'],
+html:not([data-skin])[data-theme='light'] {
+  --bg: #f7f7f8; --surface: #ffffff; --surface-2: #f1f1f3; --surface-3: #e7e7ea; --border: #e6e6ea;
+  --text: #0c0c0f; --muted: #6b6b76; --accent: #f05a14; --accent-2: #ff7633; --accent-ink: #ffffff; --accent-soft: rgb(240 90 20 / 0.09);
+  --good: #12a150; --good-soft: rgb(18 161 80 / 0.1); --data: #2563eb; --data-soft: rgb(37 99 235 / 0.09);
+  --warn: #c77700; --warn-soft: rgb(199 119 0 / 0.1); --danger: #e11d48; --teal: #0d9488; --violet: #7c3aed; --pink: #db2777;
+  --shadow: 0 1px 2px rgb(16 16 24 / 0.04);
+}
+
+/* ---------------------------------------------------------------- Doodle */
+/* Sketchbook: ink lines, hand lettering, marker highlights, a little wobble. */
+[data-skin='doodle'] {
+  --font: 'Kalam', 'Comic Sans MS', cursive;
+  --font-display: 'Caveat', 'Kalam', cursive;
+  --radius: 18px 26px 16px 24px / 24px 16px 26px 18px;
+  --radius-sm: 14px 8px 12px 9px / 9px 12px 8px 14px;
+  --bw: 2px;
+  --display-weight: 700;
+}
+[data-skin='doodle'][data-theme='light'] {
+  --bg: #fffdf5; --surface: #fffefa; --surface-2: #fbf6e6; --surface-3: #f1e9cf; --border: #1f1d1a;
+  --text: #1f1d1a; --muted: #6a645a; --accent: #ff5d73; --accent-2: #ff7a8c; --accent-ink: #1f1d1a; --accent-soft: rgb(255 230 90 / 0.55);
+  --good: #1f9d55; --good-soft: rgb(120 220 150 / 0.35); --data: #2f6fde; --data-soft: rgb(120 170 255 / 0.3);
+  --warn: #d18a00; --warn-soft: rgb(255 210 90 / 0.4); --danger: #e0303f; --teal: #0f9b8e; --violet: #7a4fd6; --pink: #e44c9a;
+  --shadow: 3px 3px 0 #1f1d1a;
+  --page-bg: radial-gradient(circle, rgb(31 29 26 / 0.09) 1px, transparent 1.2px) 0 0 / 22px 22px, #fffdf5;
+}
+[data-skin='doodle'][data-theme='dark'] {
+  --bg: #1c2420; --surface: #222b26; --surface-2: #2a342e; --surface-3: #344039; --border: #e9efe6;
+  --text: #f1f5ee; --muted: #a9b5ab; --accent: #ffd84d; --accent-2: #ffe27a; --accent-ink: #1c2420; --accent-soft: rgb(255 216 77 / 0.2);
+  --good: #8ee39c; --good-soft: rgb(142 227 156 / 0.18); --data: #8cc8ff; --data-soft: rgb(140 200 255 / 0.18);
+  --warn: #ffb86b; --warn-soft: rgb(255 184 107 / 0.2); --danger: #ff8a8a; --teal: #7fe0d2; --violet: #c8a8ff; --pink: #ff9fd0;
+  --shadow: 3px 3px 0 rgb(233 239 230 / 0.85);
+  --page-bg: radial-gradient(circle, rgb(233 239 230 / 0.08) 1px, transparent 1.2px) 0 0 / 22px 22px, #1c2420;
+}
+
+/* ---------------------------------------------------------------- Retro */
+/* Light: 1984 desktop (beige, black outlines, hard shadows). Dark: phosphor terminal. */
+[data-skin='retro'] {
+  --font: 'JetBrains Mono Variable', ui-monospace, monospace;
+  --font-display: 'VT323', 'JetBrains Mono Variable', monospace;
+  --radius: 0px;
+  --radius-sm: 0px;
+  --bw: 2px;
+  --display-weight: 400;
+  --label-case: uppercase;
+  --label-spacing: 0.08em;
+}
+[data-skin='retro'][data-theme='light'] {
+  --bg: #e9e4d6; --surface: #f6f2e7; --surface-2: #ece6d6; --surface-3: #ddd5c0; --border: #121212;
+  --text: #121212; --muted: #5b5648; --accent: #2b59ff; --accent-2: #4a71ff; --accent-ink: #ffffff; --accent-soft: rgb(43 89 255 / 0.14);
+  --good: #13854a; --good-soft: rgb(19 133 74 / 0.14); --data: #2b59ff; --data-soft: rgb(43 89 255 / 0.12);
+  --warn: #b26b00; --warn-soft: rgb(178 107 0 / 0.14); --danger: #d1192f; --teal: #0d7f75; --violet: #6b3fd1; --pink: #c42a7c;
+  --shadow: 4px 4px 0 #121212;
+}
+[data-skin='retro'][data-theme='dark'] {
+  --bg: #050805; --surface: #0a110b; --surface-2: #0f1a11; --surface-3: #152418; --border: #1f7a3a;
+  --text: #b6ffcb; --muted: #4fae6c; --accent: #39ff88; --accent-2: #7dffb0; --accent-ink: #031a0b; --accent-soft: rgb(57 255 136 / 0.12);
+  --good: #39ff88; --good-soft: rgb(57 255 136 / 0.12); --data: #5ce1ff; --data-soft: rgb(92 225 255 / 0.12);
+  --warn: #ffd23f; --warn-soft: rgb(255 210 63 / 0.12); --danger: #ff4f5e; --teal: #4dffd8; --violet: #c49bff; --pink: #ff7ad1;
+  --shadow: 0 0 0 1px rgb(57 255 136 / 0.15), 0 0 18px rgb(57 255 136 / 0.06);
+  --page-bg: repeating-linear-gradient(0deg, rgb(57 255 136 / 0.03) 0 1px, transparent 1px 3px), #050805;
+}
+
+/* ---------------------------------------------------------------- Glass */
+/* Aurora light behind frosted panels. */
+[data-skin='glass'] {
+  --radius: 22px;
+  --radius-sm: 14px;
+  --blur: blur(18px) saturate(1.4);
+}
+[data-skin='glass'][data-theme='dark'] {
+  --bg: #0b0b1a; --surface: rgb(255 255 255 / 0.06); --surface-2: rgb(255 255 255 / 0.08); --surface-3: rgb(255 255 255 / 0.13); --border: rgb(255 255 255 / 0.12);
+  --text: #f5f6ff; --muted: #a9acd0; --accent: #8b7bff; --accent-2: #a597ff; --accent-ink: #0b0b1a; --accent-soft: rgb(139 123 255 / 0.18);
+  --good: #4ff0b4; --good-soft: rgb(79 240 180 / 0.15); --data: #6cc6ff; --data-soft: rgb(108 198 255 / 0.15);
+  --warn: #ffcf5a; --warn-soft: rgb(255 207 90 / 0.15); --danger: #ff6b8b; --teal: #4fe3e3; --violet: #c49bff; --pink: #ff8fd0;
+  --shadow: 0 10px 40px rgb(0 0 0 / 0.25);
+  --page-bg: radial-gradient(60% 50% at 15% 10%, rgb(124 92 255 / 0.35), transparent 70%), radial-gradient(50% 50% at 90% 20%, rgb(0 200 255 / 0.22), transparent 70%), radial-gradient(60% 60% at 60% 100%, rgb(255 90 170 / 0.2), transparent 70%), #0b0b1a;
+}
+[data-skin='glass'][data-theme='light'] {
+  --bg: #eef0fb; --surface: rgb(255 255 255 / 0.62); --surface-2: rgb(255 255 255 / 0.5); --surface-3: rgb(255 255 255 / 0.75); --border: rgb(255 255 255 / 0.85);
+  --text: #15163a; --muted: #5d6190; --accent: #6a52ff; --accent-2: #8572ff; --accent-ink: #ffffff; --accent-soft: rgb(106 82 255 / 0.12);
+  --good: #0fa36b; --good-soft: rgb(15 163 107 / 0.12); --data: #1b84e8; --data-soft: rgb(27 132 232 / 0.12);
+  --warn: #c98200; --warn-soft: rgb(201 130 0 / 0.12); --danger: #e1305f; --teal: #0b9a9a; --violet: #7c4dff; --pink: #e0479e;
+  --shadow: 0 8px 30px rgb(60 60 140 / 0.12);
+  --page-bg: radial-gradient(60% 50% at 10% 0%, rgb(150 130 255 / 0.45), transparent 70%), radial-gradient(50% 50% at 95% 15%, rgb(100 210 255 / 0.4), transparent 70%), radial-gradient(60% 60% at 60% 100%, rgb(255 150 200 / 0.35), transparent 70%), #eef0fb;
+}
+
+/* ---------------------------------------------------------------- Editorial */
+/* Magazine: warm paper, serif numbers, thin rules, no boxes shouting. */
+[data-skin='editorial'] {
+  --font-display: 'Fraunces Variable', Georgia, serif;
+  --radius: 4px;
+  --radius-sm: 3px;
+  --display-weight: 560;
+  --label-case: uppercase;
+  --label-spacing: 0.12em;
+}
+[data-skin='editorial'][data-theme='light'] {
+  --bg: #f4efe6; --surface: #fbf8f2; --surface-2: #efe8db; --surface-3: #e4dac8; --border: #d9cfbd;
+  --text: #1d1a16; --muted: #6f665a; --accent: #b3261e; --accent-2: #cc3a2f; --accent-ink: #fbf8f2; --accent-soft: rgb(179 38 30 / 0.08);
+  --good: #2f7d4a; --good-soft: rgb(47 125 74 / 0.1); --data: #1f4e8c; --data-soft: rgb(31 78 140 / 0.09);
+  --warn: #a8660a; --warn-soft: rgb(168 102 10 / 0.1); --danger: #b3261e; --teal: #1d6f68; --violet: #5b3f8c; --pink: #a33a6b;
+  --shadow: none;
+}
+[data-skin='editorial'][data-theme='dark'] {
+  --bg: #15120e; --surface: #1c1813; --surface-2: #242019; --surface-3: #2f2a21; --border: #3a3329;
+  --text: #f2ebdf; --muted: #a89c88; --accent: #ef6b4a; --accent-2: #ff8566; --accent-ink: #15120e; --accent-soft: rgb(239 107 74 / 0.12);
+  --good: #7cc58f; --good-soft: rgb(124 197 143 / 0.12); --data: #8fb4e8; --data-soft: rgb(143 180 232 / 0.12);
+  --warn: #e2a64b; --warn-soft: rgb(226 166 75 / 0.13); --danger: #ef6b4a; --teal: #6cc2b8; --violet: #b39ddb; --pink: #e48fb4;
+  --shadow: none;
+}
+
+/* ---------------------------------------------------------------- Swiss */
+/* International style: grid, black, white, one red. Big numbers, tight labels. */
+[data-skin='swiss'] {
+  --font-display: 'Inter Variable', Inter, sans-serif;
+  --radius: 0px;
+  --radius-sm: 0px;
+  --display-weight: 800;
+  --label-case: uppercase;
+  --label-spacing: 0.06em;
+}
+[data-skin='swiss'][data-theme='light'] {
+  --bg: #ffffff; --surface: #ffffff; --surface-2: #f2f2f2; --surface-3: #e5e5e5; --border: #111111;
+  --text: #111111; --muted: #555555; --accent: #e30613; --accent-2: #ff2a36; --accent-ink: #ffffff; --accent-soft: rgb(227 6 19 / 0.08);
+  --good: #111111; --good-soft: #f2f2f2; --data: #111111; --data-soft: #f2f2f2;
+  --warn: #e30613; --warn-soft: rgb(227 6 19 / 0.08); --danger: #e30613; --teal: #111; --violet: #111; --pink: #e30613;
+  --shadow: none;
+}
+[data-skin='swiss'][data-theme='dark'] {
+  --bg: #000000; --surface: #0b0b0b; --surface-2: #161616; --surface-3: #222222; --border: #f2f2f2;
+  --text: #f2f2f2; --muted: #9a9a9a; --accent: #ff2a36; --accent-2: #ff5a63; --accent-ink: #000000; --accent-soft: rgb(255 42 54 / 0.12);
+  --good: #f2f2f2; --good-soft: #161616; --data: #f2f2f2; --data-soft: #161616;
+  --warn: #ff2a36; --warn-soft: rgb(255 42 54 / 0.12); --danger: #ff2a36; --teal: #f2f2f2; --violet: #f2f2f2; --pink: #ff2a36;
+  --shadow: none;
+}
+
+/* ---------------------------------------------------------------- skin-wide rules */
+body { font-family: var(--font); background: var(--page-bg); background-attachment: fixed; }
+h1, h2, .stat-num, .w-value, .brand { font-family: var(--font-display); font-weight: var(--display-weight); }
+.card, .widget, .sidebar, .sheet, .mon-note, .btn, .input, .pill, .segmented, .seg, .icon-btn, .chip-toggle, .provider-btn, .goal-card {
+  border-width: var(--bw);
+}
+.card, .widget, .sheet { border-radius: var(--radius); box-shadow: var(--shadow); }
+.btn, .input, .icon-btn, .segmented, .seg, .provider-btn, .goal-card, .nav-item, .mon-note { border-radius: var(--radius-sm); }
+.eyebrow, .w-label { text-transform: var(--label-case); letter-spacing: var(--label-spacing); }
+[data-skin='glass'] .card, [data-skin='glass'] .widget, [data-skin='glass'] .sidebar, [data-skin='glass'] .sheet, [data-skin='glass'] .tabbar, [data-skin='glass'] .topbar {
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+[data-skin='glass'] .sidebar { background: rgb(255 255 255 / 0.04); }
+[data-skin='glass'][data-theme='light'] .sidebar { background: rgb(255 255 255 / 0.45); }
+[data-skin='doodle'] .btn-primary, [data-skin='retro'] .btn-primary { box-shadow: var(--shadow); }
+[data-skin='doodle'] .w-value { letter-spacing: 0; font-size: 40px; }
+[data-skin='doodle'] h1 { letter-spacing: 0; font-size: 40px; }
+[data-skin='doodle'] .widget:hover { transform: rotate(-0.4deg); }
+[data-skin='doodle'] .pill.accent, [data-skin='doodle'] mark { background: var(--accent-soft); color: var(--text); }
+[data-skin='retro'] h1 { font-size: 40px; }
+[data-skin='retro'] .w-value { font-size: 40px; line-height: 0.9; }
+[data-skin='retro'][data-theme='dark'] .w-value, [data-skin='retro'][data-theme='dark'] h1 { text-shadow: 0 0 10px rgb(57 255 136 / 0.45); }
+[data-skin='editorial'] .widget, [data-skin='editorial'] .card { border-width: 0 0 1px 0; border-radius: 0; background: transparent; }
+[data-skin='editorial'] .w-value { font-style: italic; }
+[data-skin='swiss'] .widget, [data-skin='swiss'] .card { border-width: 0; border-top: 3px solid var(--text); border-radius: 0; }
+[data-skin='swiss'] .w-value { letter-spacing: -0.04em; }
+[data-skin='swiss'] h1 { letter-spacing: -0.04em; font-size: 40px; }

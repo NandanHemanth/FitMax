@@ -1,3 +1,4 @@
+import { openSpace } from '../space/open';
 import maplibregl, { type GeoJSONSource, type Map as MLMap } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type * as GeoJSON from 'geojson';
@@ -379,7 +380,12 @@ export function Places() {
             <div ref={containerRef} className="map" />
           </div>
           {focus ? (
-            <ScoreCard name={focus.home.name ?? 'Home'} addr={focus.home.addr} score={focus.score} />
+            <ScoreCard
+              name={focus.home.name ?? 'Home'}
+              addr={focus.home.addr}
+              score={focus.score}
+              onBuild={() => openSpace({ id: focus.home.id, name: focus.home.name ?? 'Home', addr: focus.home.addr, lat: focus.home.lat, lng: focus.home.lon, score: focus.score.total })}
+            />
           ) : (
             <div className="map-card">
               <strong>Hover or tap a home</strong>
@@ -404,7 +410,7 @@ function topReason(s: HomeScore): string {
   return best ? best[1].reason : '';
 }
 
-function ScoreCard({ name, addr, score }: { name: string; addr?: string | null; score: HomeScore }) {
+function ScoreCard({ name, addr, score, onBuild }: { name: string; addr?: string | null; score: HomeScore; onBuild: () => void }) {
   const cats = (Object.entries(score.categories) as [Category, HomeScore['categories'][Category]][]).sort((a, b) => b[1].weight - a[1].weight);
   return (
     <div className="map-card">
@@ -434,8 +440,8 @@ function ScoreCard({ name, addr, score }: { name: string; addr?: string | null; 
           </div>
         ))}
       </div>
-      <button className="btn btn-block" style={{ marginTop: 10 }} disabled title="Next: 3D design with Matterport">
-        <IconCube size={16} /> FitMax this home · 3D, coming next
+      <button className="btn btn-primary btn-block" style={{ marginTop: 10 }} onClick={onBuild}>
+        <IconCube size={16} /> FitMax this home · 3D gym builder
       </button>
     </div>
   );

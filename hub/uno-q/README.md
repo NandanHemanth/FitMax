@@ -7,7 +7,34 @@ The UNO Q runs [RuView](https://github.com/ruvnet/RuView), a WiFi-sensing server
                                                └─MQTT──▶ Home Assistant ──▶ Google Home · Apple Home · Alexa
 ```
 
-**Why ESP32 nodes?** WiFi sensing needs raw *channel state information* (CSI) from the radio. The UNO Q's Qualcomm WiFi chip doesn't expose CSI, so it acts as the **hub** while ESP32-S3 boards are the **sensors**. Until you have one, the hub runs in **simulated** mode, and FitMax marks every reading and alert as simulated.
+**Why ESP32 nodes?** Full WiFi sensing needs raw *channel state information* (CSI) from the radio. The UNO Q's Qualcomm WiFi chip (ath10k driver) doesn't expose CSI, so with CSI the UNO Q acts as the **hub** while ESP32-S3 boards are the **sensors**.
+
+## No extra hardware? Use RSSI mode
+
+With only a laptop and the UNO Q, run:
+
+```bash
+./setup.sh rssi
+```
+
+This installs `rssi_sense.py` as a service. It samples the board's own WiFi signal strength and ping latency 10 times a second, and serves the same API as RuView, so FitMax's Monitor works unchanged. The badge reads **Live · rssi**.
+
+| Works in RSSI mode | Needs CSI hardware (ESP32-S3 or an Intel AX200/AX210 card) |
+| --- | --- |
+| Presence, motion level, active minutes | Breathing, heart rate |
+| Repetitive exercise: cadence and rep count (±1–2 reps) | Fall detection |
+| Inactivity alerts | Position, heatmap, people count |
+
+How to get good readings:
+
+1. Put the UNO Q and the router 2–6 m apart and exercise **between** them; movement across that line swings the signal most.
+2. Leave the room for 15 s, then calibrate the empty-room baseline (the command is printed by setup). This helps it notice someone sitting still.
+3. Test it: `curl -H "Authorization: Bearer <token>" http://<uno-q-ip>:3000/api/v1/sensing/latest`
+4. To try it without the board: `python3 rssi_sense.py --token test --source synthetic` on the laptop, then set `RUVIEW_URL=http://localhost:3000`.
+
+It also runs on a Linux laptop (`python3 rssi_sense.py --token … --port 3000`), using the laptop's WiFi link instead.
+
+The rest of this guide covers the CSI path with RuView. Until ESP32 boards stream to it, RuView runs in **simulated** mode and FitMax marks every reading and alert as simulated.
 
 ## 1. Get a shell on the UNO Q
 

@@ -1,21 +1,25 @@
-import { lazy, Suspense, type ReactElement } from 'react';
+import { lazy, Suspense, useState, type ReactElement } from 'react';
+import { ThemePicker } from './ui/ThemePicker';
 import { AppProvider, useApp, type Tab } from './state/app';
 import { Onboarding, SignIn } from './screens/Auth';
 import { Dashboard } from './screens/Dashboard';
 import { Nutrition } from './screens/Nutrition';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { Train } from './screens/Train';
-import { IconApple, IconDumbbell, IconHome, IconMap, IconMoon, IconPulse, IconSun, IconUser } from './ui/icons';
+import { IconApple, IconCube, IconDumbbell, IconHome, IconMap, IconMoon, IconPulse, IconSun, IconUser } from './ui/icons';
 import { Monitor } from './screens/Monitor';
 
 // The map library is large: load it only when Places opens.
 const Places = lazy(() => import('./screens/Places').then((m) => ({ default: m.Places })));
+const Space = lazy(() => import('./screens/Space').then((m) => ({ default: m.Space })));
+const Interior = lazy(() => import('./screens/Interior').then((m) => ({ default: m.Interior })));
 
 const NAV: { id: Tab; label: string; icon: ReactElement }[] = [
   { id: 'home', label: 'Dashboard', icon: <IconHome /> },
   { id: 'train', label: 'Train', icon: <IconDumbbell /> },
   { id: 'nutrition', label: 'Nutrition', icon: <IconApple /> },
   { id: 'places', label: 'Places', icon: <IconMap /> },
+  { id: 'interior', label: 'Design', icon: <IconCube /> },
   { id: 'monitor', label: 'Monitor', icon: <IconPulse /> },
   { id: 'profile', label: 'Profile', icon: <IconUser /> },
 ];
@@ -36,8 +40,9 @@ function Root() {
 }
 
 function Shell() {
-  const { tab, setTab, theme, toggleTheme, profile } = useApp();
-  const ThemeIcon = theme === 'dark' ? IconSun : IconMoon;
+  const { tab, setTab, theme, profile } = useApp();
+  const [look, setLook] = useState(false);
+  const ThemeIcon = theme === 'dark' ? IconMoon : IconSun;
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -50,8 +55,8 @@ function Shell() {
           </button>
         ))}
         <div className="sidebar-foot">
-          <button className="nav-item" onClick={toggleTheme}>
-            <ThemeIcon /> {theme === 'dark' ? 'Light' : 'Dark'} theme
+          <button className="nav-item" onClick={() => setLook(true)}>
+            <ThemeIcon /> Look
           </button>
           <span className="tiny muted" style={{ padding: '0 12px' }}>
             Signed in as {profile?.name}
@@ -63,7 +68,7 @@ function Shell() {
         <button className="brand" onClick={() => setTab('home')}>
           <img src="/logo.svg" alt="" /> FitMax
         </button>
-        <button className="icon-btn" onClick={toggleTheme} aria-label="Toggle theme">
+        <button className="icon-btn" onClick={() => setLook(true)} aria-label="Change look">
           <ThemeIcon size={18} />
         </button>
       </header>
@@ -77,10 +82,21 @@ function Shell() {
             <Places />
           </Suspense>
         )}
+        {tab === 'space' && (
+          <Suspense fallback={<p className="muted">Loading 3D builder…</p>}>
+            <Space />
+          </Suspense>
+        )}
+        {tab === 'interior' && (
+          <Suspense fallback={<p className="muted">Loading 3D home…</p>}>
+            <Interior />
+          </Suspense>
+        )}
         {tab === 'monitor' && <Monitor />}
         {tab === 'profile' && <ProfileScreen />}
       </main>
 
+      {look && <ThemePicker onClose={() => setLook(false)} />}
       <nav className="tabbar" aria-label="Main">
         {NAV.map((n) => (
           <button key={n.id} className={tab === n.id ? 'on' : ''} onClick={() => setTab(n.id)} aria-current={tab === n.id ? 'page' : undefined}>

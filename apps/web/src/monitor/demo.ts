@@ -18,6 +18,10 @@ export interface Live {
   phase?: PhaseId;
   reps?: number;
   zone?: string;
+  exercising?: boolean;
+  exerciseName?: string;
+  /** Shown in the room view when there's no position to draw */
+  note?: string;
 }
 
 export const GRID = 20;
@@ -162,6 +166,9 @@ export function hubLive(s: RvSensing | null, r: Reading): Live {
     const max = Math.max(...vals, 1e-6);
     field = vals.map((v) => v / max);
   }
-  const label = !r.presence ? 'Nobody home' : r.motion === 'active' ? 'Very active' : r.motion === 'moving' ? 'Moving around' : 'Still';
-  return { energy, breath: null, hr: r.heart.bpm, br: r.breathing.bpm, persons, field, activity: label };
+  const ex = s?.exercise;
+  const exercising = Boolean(ex?.periodic);
+  const label = !r.presence ? 'Nobody home' : exercising ? `Repetitive exercise · ${ex?.cadence_per_min ?? '–'}/min` : r.motion === 'active' ? 'Very active' : r.motion === 'moving' ? 'Moving around' : 'Still';
+  const note = r.presence && persons.length === 0 ? (r.source === 'rssi' ? 'Someone is moving in the WiFi path · RSSI mode has no position' : 'Someone is here') : undefined;
+  return { energy, breath: null, hr: r.heart.bpm, br: r.breathing.bpm, persons, field, activity: label, exercising, exerciseName: 'Reps', reps: ex?.reps, note };
 }

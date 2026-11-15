@@ -1,17 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
-import { demoFrame, hubLive, type Live } from '../monitor/demo';
-import { acknowledge, DEFAULT_WATCH, emptyWatch, normalize, step, type Alert, type Minute, type Reading, type RvEdge, type RvHealth, type RvSensing, type RvVitals, type WatchSettings, type WatchState } from '../monitor/engine';
-import { LiveView } from '../monitor/LiveView';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { demoFrame, type Live } from '../monitor/demo';
+import { acknowledge, attribute, DEFAULT_WATCH, emptyWatch, normalize, step, dayKey, type Alert, type MeStatus, type Minute, type Reading, type RvEdge, type RvHealth, type RvVitals, type WatchSettings, type WatchState } from '../monitor/engine';
+import { LinkScope, RoomView, scopeColor } from '../monitor/RoomView';
+import { fromDemo, fromHub, kcalPerSecond, metFor, type HubSensing, type MonView } from '../monitor/view';
 import { useApp } from '../state/app';
-import { IconAlert, IconCheck, IconPulse, IconShield, IconWifi } from '../ui/icons';
+import { IconAlert, IconCheck, IconHeart, IconMoon, IconPulse, IconShield, IconWifi } from '../ui/icons';
+import { Bento, Ring, Row, Sheet, Spark, Widget } from '../ui/widgets';
 
-const POLL_MS = 2000;
+const POLL_MS = 1000;
 const DEMO_MS = 100;
-const HIST = 100; // samples kept for the live scopes
+const HIST = 120;
 const KEY = 'fitmax.monitor';
 const SKEY = 'fitmax.monitor.settings';
 const MKEY = 'fitmax.monitor.mode';
-const DEMO_INACTIVITY_MIN = 15; // the demo's sofa scene is 17 "minutes"
+const OKEY = 'fitmax.monitor.onlyme';
+const CKEY = 'fitmax.monitor.kcal';
+const DEMO_INACTIVITY_MIN = 15;
+const LABELS = ['Empty room', 'Standing', 'Walking', 'Squats', 'Jumping jacks', 'Push-ups', 'Lying down', 'Fall (mat)'];
 
 const load = <T,>(k: string, fallback: T): T => {
   try {
@@ -25,10 +30,9 @@ const save = (k: string, v: unknown) => {
   try {
     localStorage.setItem(k, JSON.stringify(v));
   } catch {
-    /* storage full or blocked: monitor still works in memory */
+    /* storage blocked: works in memory */
   }
 };
-
 async function get<T>(path: string): Promise<T | null> {
   try {
     const r = await fetch(`/api/ruview/${path}`, { cache: 'no-store' });
@@ -37,15 +41,24 @@ async function get<T>(path: string): Promise<T | null> {
     return null;
   }
 }
+async function post<T>(path: string, body: unknown): Promise<T | null> {
+  try {
+    const r = await fetch(`/api/ruview/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return r.ok ? ((await r.json()) as T) : null;
+  } catch {
+    return null;
+  }
+}
 
 type Config = { configured: boolean; hub: string | null } | null;
 type Mode = 'demo' | 'hub';
-interface Track { energyHist: number[]; breathHist: number[]; bedExitAt: number | null; hrPeak: number | null; hrRecovery: number | null }
-const emptyTrack = (): Track => ({ energyHist: [], breathHist: [], bedExitAt: null, hrPeak: null, hrRecovery: null });
-const push = (a: number[], v: number) => (a.length >= HIST ? [...a.slice(1), v] : [...a, v]);
+type Panel = null | 'room' | 'signal' | 'reps' | 'vitals' | 'safety' | 'settings' | 'record' | 'rest' | 'how';
+const pushN = (a: number[], v: number, n = HIST) => (a.length >= n ? [...a.slice(1), v] : [...a, v]);
+const mins = (s: number) => Math.round(s / 60);
 
 export function Monitor() {
   const { profile } = useApp();
+  const kg = profile?.weightKg ?? 75;
   const [config, setConfig] = useState<Config>(null);
   const [mode, setModeState] = useState<Mode | null>(() => {
     try {
@@ -55,16 +68,34 @@ export function Monitor() {
     }
   });
   const [reading, setReading] = useState<Reading | null>(null);
-  const [live, setLive] = useState<Live | null>(null);
-  const [track, setTrack] = useState<Track>(emptyTrack);
+  const [view, setView] = useState<MonView | null>(null);
+  const [series, setSeries] = useState<{ id: string; values: number[] }[]>([]);
+  const [energyHist, setEnergyHist] = useState<number[]>([]);
   const [watch, setWatch] = useState<WatchState>(() => load(KEY, emptyWatch(Date.now())));
   const [settings, setSettings] = useState<WatchSettings>(() => load(SKEY, DEFAULT_WATCH));
-  const [nodesTotal, setNodesTotal] = useState(0);
   const [authFail, setAuthFail] = useState(false);
+  const [onlyMe, setOnlyMe] = useState<boolean>(() => load(OKEY, { v: true }).v);
+  const [me, setMe] = useState<MeStatus | null>(null);
+  const [pausedWhy, setPausedWhy] = useState<string | null>(null);
+  const [panel, setPanel] = useState<Panel>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [kcal, setKcal] = useState<number>(() => {
+    const k = load(CKEY, { day: '', kcal: 0 });
+    return k.day === dayKey(Date.now()) ? k.kcal : 0;
+  });
+  const [labels, setLabels] = useState<{ label: string; at: number }[]>([]);
+  const onlyMeRef = useRef(onlyMe);
+  onlyMeRef.current = onlyMe;
+  const meRef = useRef(me);
+  meRef.current = me;
   const watchRef = useRef(watch);
-  const trackRef = useRef(track);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  const kcalRef = useRef(kcal);
+  const kgRef = useRef(kg);
+  kgRef.current = kg;
+  const demoReps = useRef({ done: 0, cur: 0, phase: '' });
+  const demoSeries = useRef<Record<string, number[]>>({});
 
   const setMode = (m: Mode) => {
     setModeState(m);
@@ -74,8 +105,16 @@ export function Monitor() {
       /* ignore */
     }
   };
+  const flash = (t: string) => {
+    setToast(t);
+    window.setTimeout(() => setToast(null), 2600);
+  };
+  const addKcal = (v: MonView, r: Reading, dt: number) => {
+    if (r.attributable === false) return;
+    kcalRef.current += kcalPerSecond(metFor(v, r.motion), kgRef.current) * dt;
+    setKcal(kcalRef.current);
+  };
 
-  // Which hub (if any) is configured; picks the default mode the first time.
   useEffect(() => {
     void get<{ configured: boolean; hub: string | null }>('config').then((cfg) => {
       const c = cfg ?? { configured: false, hub: null };
@@ -84,74 +123,80 @@ export function Monitor() {
     });
   }, []);
 
-  // Reset the view when switching source; the hub's history is persisted, the demo's isn't.
   useEffect(() => {
     if (!mode) return;
     const w = mode === 'hub' ? load(KEY, emptyWatch(Date.now())) : emptyWatch(Date.now());
     watchRef.current = w;
-    trackRef.current = emptyTrack();
     setWatch(w);
-    setTrack(trackRef.current);
     setReading(null);
-    setLive(null);
+    setView(null);
+    setSeries([]);
+    setEnergyHist([]);
     setAuthFail(false);
+    demoReps.current = { done: 0, cur: 0, phase: '' };
+    demoSeries.current = {};
   }, [mode]);
 
-  // Demo: scripted day at home at 10 Hz, through the same alert engine
+  // Demo: a scripted day at home (1 s = 1 min), through the same alert engine as the hub
   useEffect(() => {
     if (mode !== 'demo') return;
     const t0 = performance.now();
     const startAt = Date.now();
     const id = window.setInterval(() => {
       const sec = (performance.now() - t0) / 1000;
-      const { reading: r, live: l } = demoFrame(sec, startAt);
+      const { reading: raw, live: l } = demoFrame(sec, startAt);
+      const { reading: r } = attribute(raw, onlyMeRef.current, { configured: true, home: true });
       const { state } = step(watchRef.current, r, { ...settingsRef.current, inactivityMin: Math.min(settingsRef.current.inactivityMin, DEMO_INACTIVITY_MIN) });
-      const tr = trackRef.current;
-      const next: Track = {
-        energyHist: push(tr.energyHist, l.energy),
-        breathHist: push(tr.breathHist, l.breath ?? 0),
-        bedExitAt: l.phase === 'wake' && (tr.bedExitAt == null || r.at - tr.bedExitAt > 10 * 60_000) ? r.at : tr.bedExitAt,
-        hrPeak: l.phase === 'workout' ? Math.max(tr.hrPeak ?? 0, l.hr ?? 0) : tr.hrPeak,
-        hrRecovery: l.phase === 'cooldown' && tr.hrPeak && l.hr ? Math.max(0, tr.hrPeak - l.hr) : l.phase === 'workout' ? null : tr.hrRecovery,
-      };
       watchRef.current = state;
-      trackRef.current = next;
+      const dr = demoReps.current;
+      if (l.phase === 'workout') dr.cur = Math.max(dr.cur, l.reps ?? 0);
+      else if (dr.phase === 'workout') {
+        dr.done += dr.cur;
+        dr.cur = 0;
+      }
+      dr.phase = l.phase ?? '';
+      const v = fromDemo(l, r, dr.done + dr.cur);
+      const ser = demoSeries.current;
+      v.links.forEach((lk, k) => {
+        const base = [-48, -54, -61][k] ?? -55;
+        const val = base - (lk.z - 0.8) * 0.9 + (Math.random() - 0.5) * (0.6 + (lk.z - 0.8) * 1.4) + (l.phase === 'workout' && k === 0 ? 3 * Math.sin(sec * 2.6) : 0);
+        ser[lk.id] = pushN(ser[lk.id] ?? [], val);
+      });
+      setSeries(v.links.map((lk) => ({ id: lk.id, values: ser[lk.id] })));
       setWatch(state);
-      setTrack(next);
       setReading(r);
-      setLive(l);
+      setView(v);
+      setEnergyHist((h) => pushN(h, l.energy));
+      addKcal(v, r, (DEMO_MS / 1000) * 60); // the demo clock runs 60x
     }, DEMO_MS);
     return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
-  // Hub: poll the UNO Q through the laptop's read-only proxy
+  // Hub: the UNO Q through the laptop's proxy, once a second
   useEffect(() => {
     if (mode !== 'hub' || !config?.configured) return;
     let alive = true;
     let timer: number | undefined;
     const tick = async () => {
-      const [h, s, v, e, n] = await Promise.all([
-        get<RvHealth>('health'),
-        get<RvSensing>('sensing/latest'),
-        get<RvVitals>('vital-signs'),
-        get<RvEdge>('edge-vitals'),
-        get<{ total?: number }>('nodes'),
-      ]);
+      const [h, s, v, e] = await Promise.all([get<RvHealth>('health'), get<HubSensing>('sensing/latest'), get<RvVitals>('vital-signs'), get<RvEdge>('edge-vitals')]);
       if (!alive) return;
-      // Health is open but /api/v1/* needs the token: a 401 there means .env has the wrong one
       setAuthFail(Boolean(h) && !s && (await fetch('/api/ruview/status').then((x) => x.status === 401).catch(() => false)));
-      const r = normalize(Date.now(), h, s, v, e);
+      const { reading: r, reason } = attribute(normalize(Date.now(), h, s, v, e), onlyMeRef.current, meRef.current);
+      setPausedWhy(reason);
       const { state } = step(watchRef.current, r, settingsRef.current);
-      const l = hubLive(s, r);
-      const tr = trackRef.current;
-      trackRef.current = { ...tr, energyHist: push(tr.energyHist, l.energy) };
       watchRef.current = state;
-      setTrack(trackRef.current);
+      const mv = fromHub(s, r);
       setReading(r);
-      setLive(l);
+      setView(mv);
       setWatch(state);
-      setNodesTotal(Math.max(n?.total ?? 0, r.nodes.length));
+      setEnergyHist((hh) => pushN(hh, mv.energy, 60));
+      if (r.live) addKcal(mv, r, POLL_MS / 1000);
       save(KEY, state);
+      if (s?.source === 'rssi') {
+        const raw = await get<{ links?: Record<string, number[]>; rssi?: number[] }>('rssi/recent?seconds=12');
+        if (alive && raw) setSeries(raw.links ? Object.entries(raw.links).map(([id, values]) => ({ id, values })) : [{ id: 'link', values: raw.rssi ?? [] }]);
+      }
       timer = window.setTimeout(tick, POLL_MS);
     };
     void tick();
@@ -159,7 +204,26 @@ export function Monitor() {
       alive = false;
       window.clearTimeout(timer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, config?.configured]);
+
+  useEffect(() => save(CKEY, { day: dayKey(Date.now()), kcal: Math.round(kcal * 10) / 10 }), [kcal]);
+
+  useEffect(() => {
+    if (mode !== 'hub') return;
+    let alive = true;
+    const poll = () =>
+      void fetch('/api/me', { cache: 'no-store' })
+        .then((x) => (x.ok ? (x.json() as Promise<MeStatus>) : null))
+        .catch(() => null)
+        .then((m) => alive && setMe(m));
+    poll();
+    const id = window.setInterval(poll, 15_000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [mode]);
 
   const updateSettings = (s: WatchSettings) => {
     setSettings(s);
@@ -171,198 +235,360 @@ export function Monitor() {
     setWatch(next);
     if (mode === 'hub') save(KEY, next);
   };
+  const calibrate = async () => {
+    if (mode !== 'hub') return flash('Calibration runs on the live hub');
+    const r = await post<{ calibrated: Record<string, unknown> }>('calibrate/empty', {});
+    flash(r ? `Calibrated ${Object.keys(r.calibrated ?? {}).length} links to the empty room` : 'Hub didn’t answer');
+  };
+  const label = async (l: string) => {
+    setLabels((x) => [{ label: l, at: Date.now() }, ...x].slice(0, 30));
+    if (mode === 'hub') await post('label', { label: l });
+    flash(`Marked: ${l}`);
+  };
 
   const demo = mode === 'demo';
   const r = reading;
+  const v = view;
   const open = watch.alerts.filter((a) => Object.values(watch.open).includes(a.id));
   const critical = open.find((a) => a.severity === 'critical');
-  const stillMin = r?.presence && r.motion === 'still' && watch.lastMoveAt ? Math.floor((r.at - watch.lastMoveAt) / 60_000) : 0;
   const status = demo ? 'demo' : !r ? 'connecting' : !r.reachable ? 'offline' : authFail ? 'locked' : r.simulated ? 'simulated' : r.live ? 'live' : 'waiting';
   const needsSetup = mode === 'hub' && config && !config.configured;
-  const inactivityMin = demo ? Math.min(settings.inactivityMin, DEMO_INACTIVITY_MIN) : settings.inactivityMin;
+  const stillMin = r?.presence && r.motion === 'still' && watch.lastMoveAt ? Math.floor((r.at - watch.lastMoveAt) / 60_000) : 0;
+  const activeMin = Math.round(watch.activeMs / 60_000);
+  const intenseMin = v?.totals ? mins(v.totals.intenseS) : demo ? Math.round(activeMin * 0.4) : null;
+  const setsDone = v?.sets.length ?? 0;
 
   return (
     <div className="monitor">
       <div className="page-head">
         <div>
-          <p className="eyebrow">Home monitor · WiFi sensing, on-device</p>
-          <h1>At home</h1>
+          <p className="eyebrow">WiFi sensing</p>
+          <h1>Home</h1>
         </div>
-        <div className="row">
-          <div className="seg" role="tablist" aria-label="Data source">
-            <button role="tab" aria-selected={demo} className={demo ? 'on' : ''} onClick={() => setMode('demo')}>
-              Live demo
+        <div className="head-actions">
+          <div className="segmented" role="tablist" aria-label="Source">
+            <button className={demo ? 'on' : ''} onClick={() => setMode('demo')}>
+              Demo
             </button>
-            <button role="tab" aria-selected={!demo} className={!demo ? 'on' : ''} onClick={() => setMode('hub')}>
-              My hub
+            <button className={!demo ? 'on' : ''} onClick={() => setMode('hub')}>
+              Live hub
             </button>
           </div>
-          {!demo && <SourcePill status={status} source={r?.source} />}
-          {!demo && config?.hub && <span className="pill">Hub {config.hub}</span>}
+          <StatusChip status={status} source={r?.source} paused={onlyMe && !demo ? pausedWhy : null} links={v?.links.filter((l) => l.live).length ?? 0} />
+          <button className="icon-btn" onClick={() => setPanel('settings')} aria-label="Monitor settings">
+            ⚙
+          </button>
         </div>
       </div>
-
-      {demo && (
-        <div className="mon-note demo">
-          <IconPulse size={18} />
-          <span>
-            <strong>Demo: a day at home, 1 second = 1 minute.</strong> Sleep → bed exit → home workout → sofa → a fall → recovery, played through the same alert logic as the real hub. With ESP32 sensors, “My hub” shows your home live.
-          </span>
-        </div>
-      )}
-      {!demo && authFail && (
-        <div className="mon-note warn">
-          <IconShield size={18} />
-          <span>
-            <strong>The hub rejected FitMax’s token.</strong> Copy RUVIEW_API_TOKEN again from the hub (re-run <code>./setup.sh</code> to print it) into <code>apps/web/.env</code>, then restart <code>npm run dev</code>.
-          </span>
-        </div>
-      )}
-      {!demo && !authFail && status === 'simulated' && (
-        <div className="mon-note">
-          <IconShield size={18} />
-          <span>
-            <strong>Simulated data.</strong> RuView is running on your hub, but no sensor nodes are streaming yet. Readings and alerts below are a demo until an ESP32-S3 node is added.
-          </span>
-        </div>
-      )}
-      {!demo && status === 'offline' && (
-        <div className="mon-note warn">
-          <IconWifi size={18} />
-          <span>
-            <strong>Can’t reach the hub.</strong> Check the UNO Q is powered and on the same WiFi, and that RUVIEW_URL in .env points to it.
-          </span>
-        </div>
-      )}
 
       {critical && (
         <div className="mon-critical" role="alert">
           <IconAlert size={26} />
           <div>
             <strong>{critical.title}</strong>
-            <p>
-              {critical.detail} {critical.demo && (demo ? '(demo)' : '(simulated)')}
-            </p>
+            <p>{critical.detail}</p>
           </div>
           <button className="btn" onClick={() => ack(critical.id)}>
             I’ve checked
           </button>
         </div>
       )}
+      {!demo && status === 'offline' && <Notice tone="warn" title="Can’t reach the hub" body="Board on? Same hotspot? RUVIEW_URL right?" onMore={() => setPanel('how')} />}
+      {!demo && authFail && <Notice tone="warn" title="Token rejected" body="Copy RUVIEW_API_TOKEN from the board into .env and restart." />}
 
       {needsSetup ? (
-        <Setup onDemo={() => setMode('demo')} />
+        <SetupCard onDemo={() => setMode('demo')} />
       ) : (
-        <>
-          {r && live && (
-            <LiveView
-              r={r}
-              live={live}
-              watch={watch}
-              x={{ ...track, stillMin, inactivityMin, age: profile?.age ?? 30, demo }}
-            />
-          )}
-          <div className="grid" style={{ marginTop: 14 }}>
-            <div className="card col-8">
-              <div className="card-head">
-                <h2>
-                  <IconPulse size={18} /> {demo ? 'Demo day' : 'Today at home'}
-                </h2>
-                <span className="pill good">{Math.round(watch.activeMs / 60_000)} active min</span>
-              </div>
-              <Timeline minutes={watch.timeline} at={r?.at ?? Date.now()} />
-              <div className="mon-legend tiny muted">
-                {(['active', 'moving', 'still', 'absent', 'offline'] as const).map((m) => (
-                  <span key={m}>
-                    <i className={`m-${m}`} /> {MOTION_LABEL[m]}
-                  </span>
-                ))}
-              </div>
-              <p className="small muted" style={{ marginTop: 10 }}>
-                {Math.round(watch.presentMs / 60_000)} min at home. Movement time here counts toward your daily activity, alongside the workouts you log in Train.
-              </p>
-            </div>
+        <Bento>
+          <Widget label="Room" icon={<IconWifi />} span={2} tall live={status === 'live' || demo} onOpen={() => setPanel('room')} badge={<span className="pill">{v?.zone ?? v?.activity ?? '…'}</span>}>
+            {v ? <RoomView nodes={v.nodes} links={v.links} field={v.field} position={v.position} room={v.room} presence={v.presence} label={!v.presence ? (status === 'offline' ? 'Offline' : 'Nobody here') : undefined} /> : <div className="rv-skel" />}
+          </Widget>
 
-            <div className="card col-4">
-              <div className="card-head">
-                <h2>Alerts</h2>
-                {open.length > 0 && <span className="pill warn">{open.length} open</span>}
-              </div>
-              {watch.alerts.length === 0 ? (
-                <p className="muted small">No alerts. FitMax raises one for a possible fall, long stillness while someone is home, resting vitals outside your range, or the hub going offline.</p>
-              ) : (
-                <ul className="list mon-alerts">
-                  {watch.alerts.slice(0, 8).map((a) => (
-                    <AlertRow key={a.id} a={a} onAck={() => ack(a.id)} />
-                  ))}
-                </ul>
-              )}
+          <Widget label="Signal" icon={<IconPulse />} span={2} onOpen={() => setPanel('signal')} badge={<span className="pill">{series.length} links</span>}>
+            <LinkScope series={series} height={96} />
+            <div className="scope-legend">
+              {series.map((s, k) => (
+                <span key={s.id}>
+                  <i style={{ background: scopeColor(k) }} />
+                  {s.id.replace('-', ' ↔ ')}
+                </span>
+              ))}
             </div>
+          </Widget>
 
-            <div className="card col-6">
-              <div className="card-head">
-                <h2>Alert rules</h2>
-              </div>
-              <label className="field">
-                <span>Alert after no movement (someone home) for</span>
-                <select value={settings.inactivityMin} onChange={(e) => updateSettings({ ...settings, inactivityMin: Number(e.target.value) })}>
-                  {[15, 30, 45, 60, 90, 120, 180].map((m) => (
-                    <option key={m} value={m}>
-                      {m < 60 ? `${m} minutes` : `${m / 60} hour${m > 60 ? 's' : ''}`}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p className="tiny muted" style={{ marginTop: 8 }}>
-                {demo && `The demo uses ${DEMO_INACTIVITY_MIN} min so you can see it fire. `}Resting breathing {settings.breathing[0]}–{settings.breathing[1]} br/min and heart rate {settings.heart[0]}–{settings.heart[1]} bpm. Vitals only count when RuView is at least {Math.round(settings.minConfidence * 100)}% confident; it abstains rather than guess. Not a medical device.
-              </p>
-            </div>
+          <Widget label="Now" value={v?.activity ?? '—'} sub={v?.periodic ? `${v.cadence ?? '–'} reps/min` : stillMin ? `still ${stillMin} min` : v?.zone ?? ' '} tone={v?.periodic ? 'accent' : undefined} className="w-now">
+            <Spark data={energyHist} max={1} />
+          </Widget>
 
-            <div className="card col-6">
-              <div className="card-head">
-                <h2>
-                  <IconWifi size={18} /> Sensor nodes
-                </h2>
-                <span className="pill data">{demo ? r?.nodes.length ?? 0 : nodesTotal}</span>
-              </div>
-              {r?.nodes.length ? (
-                <ul className="list">
-                  {r.nodes.map((n) => (
-                    <li key={n.id} className="row" style={{ justifyContent: 'space-between' }}>
-                      <span>
-                        {demo ? 'Demo node' : 'Node'} {n.id}
-                      </span>
-                      <span className="muted num">{n.rssi != null ? `${Math.round(n.rssi)} dBm` : '–'}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="muted small">No ESP32-S3 nodes yet. Each one (~$9) streams WiFi channel data to the hub; two or more per room give better presence and fall detection. Setup is in hub/uno-q/README.md.</p>
-              )}
-              <p className="tiny muted" style={{ marginTop: 8 }}>
-                Everything stays on your network: no cameras, no cloud. The hub can also publish to Home Assistant over MQTT for Google Home or Apple Home later.
-              </p>
+          <Widget label="Reps today" value={v?.reps ?? 0} sub={v?.periodic ? 'counting…' : setsDone ? `${setsDone} set${setsDone > 1 ? 's' : ''}` : 'train across a link'} tone="accent" onOpen={() => setPanel('reps')} />
+
+          <Widget label="Active" value={activeMin} unit="min" sub={intenseMin != null ? `${intenseMin} min hard` : undefined} tone="good">
+            <Ring value={activeMin} max={30} size={44} stroke={5} color="var(--good)" />
+          </Widget>
+
+          <Widget label="Burned at home" value={Math.round(kcal)} unit="kcal" sub={`est. from activity × ${Math.round(kg)} kg`} />
+
+          <Widget
+            label="Breathing"
+            icon={<IconHeart />}
+            value={v?.breathing.bpm ? Math.round(v.breathing.bpm) : '—'}
+            unit={v?.breathing.bpm ? '/min' : undefined}
+            sub={v?.breathing.bpm ? `${Math.round(v.breathing.confidence * 100)}% sure` : 'lie still near a link'}
+            badge={v?.breathing.experimental ? <span className="pill warn">beta</span> : undefined}
+            onOpen={() => setPanel('vitals')}
+          />
+
+          <Widget label="Safety" icon={<IconShield />} value={open.length ? `${open.length} alert${open.length > 1 ? 's' : ''}` : 'All clear'} tone={critical ? 'danger' : open.length ? 'warn' : 'good'} sub={v?.interference ? 'radio noise: paused' : 'falls · stillness · offline'} onOpen={() => setPanel('safety')} />
+
+          <Widget label="Rest" icon={<IconMoon />} value={v?.totals ? mins(v.totals.lyingS) : stillMin} unit="min" sub={v?.totals ? `${v.totals.restless} restless moments` : 'lying still'} onOpen={() => setPanel('rest')} />
+
+          <Widget label="Sitting streak" value={stillMin} unit="min" tone={stillMin >= 30 ? 'warn' : undefined} sub={stillMin >= 30 ? 'time to move' : 'resets when you move'} />
+
+          <Widget label="Today" span={2} className="w-timeline">
+            <Timeline minutes={watch.timeline} at={r?.at ?? Date.now()} />
+          </Widget>
+
+          <Widget label="Teach FitMax" span={2} onOpen={() => setPanel('record')} sub="Label what you’re doing; it becomes your training data." badge={<span className="pill">{labels.length}</span>}>
+            <div className="chips mini-chips" onClick={(e) => e.stopPropagation()}>
+              {LABELS.slice(0, 5).map((l) => (
+                <button key={l} className="chip-toggle" onClick={() => void label(l)}>
+                  {l}
+                </button>
+              ))}
             </div>
-          </div>
-        </>
+          </Widget>
+        </Bento>
       )}
+
+      {toast && <div className="toast">{toast}</div>}
+
+      {panel === 'room' && v && (
+        <Sheet title="Your room, through WiFi" onClose={() => setPanel(null)} wide>
+          <RoomView nodes={v.nodes} links={v.links} field={v.field} position={v.position} room={v.room} presence={v.presence} />
+          <p className="small muted" style={{ marginTop: 10 }}>
+            Each line is a radio link between two of your devices. Your body is mostly water, so it absorbs and scatters 2.4 GHz WiFi: links you stand near dim and jitter. Comparing all the links gives the heat map (radio tomographic imaging).
+          </p>
+          <button className="btn" style={{ marginTop: 12 }} onClick={() => setPanel('how')}>
+            What WiFi can measure
+          </button>
+        </Sheet>
+      )}
+      {panel === 'signal' && (
+        <Sheet title="Links" onClose={() => setPanel(null)} wide>
+          <LinkScope series={series} height={180} />
+          <div style={{ marginTop: 10 }}>
+            {(v?.links ?? []).map((l) => (
+              <Row key={l.id} k={`${l.a} ↔ ${l.b}`} hint={`${l.kind === 'ble' ? 'Bluetooth LE' : 'WiFi'}${l.calibrated ? ' · calibrated' : ''}${l.sparse ? ' · flickering' : ''}${l.live ? '' : ' · no data'}`} v={`${l.rssi != null ? `${Math.round(l.rssi)} dBm · ` : ''}${l.z.toFixed(1)}×`} />
+            ))}
+          </div>
+          <p className="tiny muted" style={{ marginTop: 8 }}>
+            × = how much more the link is moving than when the room is empty. Over 2.4× for a second counts as motion.
+          </p>
+          <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => void calibrate()}>
+            Calibrate empty room
+          </button>
+          <p className="tiny muted" style={{ marginTop: 6 }}>
+            Step out of the triangle for 15 s first.
+          </p>
+        </Sheet>
+      )}
+      {panel === 'reps' && (
+        <Sheet title="Reps" onClose={() => setPanel(null)}>
+          <Row k="Today" v={v?.reps ?? 0} />
+          {(v?.sets ?? []).map((s, i) => (
+            <Row key={i} k={`Set ${i + 1}`} hint={s.ended ? new Date(s.ended * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : undefined} v={`${s.reps} reps · ${s.cadence ?? '–'}/min`} />
+          ))}
+          <p className="tiny muted" style={{ marginTop: 10 }}>
+            Counted from the rhythm your body makes crossing a link: needs a clear wave (≥2 dB, regular period, same link). Level flicker and walking laps don’t count. Typical error ±1–2 reps.
+          </p>
+        </Sheet>
+      )}
+      {panel === 'vitals' && (
+        <Sheet title="Breathing & heart" onClose={() => setPanel(null)}>
+          <Row k="Breathing" v={v?.breathing.bpm ? `${Math.round(v.breathing.bpm)} /min` : '—'} hint={v?.breathing.why ?? undefined} />
+          <Row k="Heart rate" v={v?.heart ? `${v.heart} bpm` : '—'} hint={demo ? 'demo values' : 'needs CSI hardware (ESP32-S3)'} />
+          <p className="tiny muted" style={{ marginTop: 10 }}>
+            Breathing from signal strength works when you lie or sit still with your chest close to a link (Patwari et al., 2014; UbiBreathe, 2015). FitMax only shows a number when the rhythm is clear, otherwise it says why not. Not a medical device.
+          </p>
+        </Sheet>
+      )}
+      {panel === 'rest' && (
+        <Sheet title="Rest" onClose={() => setPanel(null)}>
+          <Row k="Lying still" v={`${v?.totals ? mins(v.totals.lyingS) : 0} min`} hint="still for 5+ minutes" />
+          <Row k="Restless moments" v={v?.totals?.restless ?? 0} hint="movement after a long still stretch" />
+          <Row k="At home" v={`${v?.totals ? mins(v.totals.presentS) : Math.round(watch.presentMs / 60_000)} min`} />
+        </Sheet>
+      )}
+      {panel === 'safety' && (
+        <Sheet title="Safety" onClose={() => setPanel(null)}>
+          {watch.alerts.length === 0 ? (
+            <p className="muted small">No alerts yet. FitMax raises one for a possible fall, a long stillness while someone is home, or the hub going offline.</p>
+          ) : (
+            <ul className="list mon-alerts">
+              {watch.alerts.slice(0, 12).map((a) => (
+                <AlertRow key={a.id} a={a} onAck={() => ack(a.id)} />
+              ))}
+            </ul>
+          )}
+          {v?.interference && <p className="small warn" style={{ marginTop: 10 }}>2.4 GHz noise jump (microwave, Bluetooth audio, a nearby router): motion and falls are paused so it can’t fake an alert.</p>}
+        </Sheet>
+      )}
+      {panel === 'record' && (
+        <Sheet title="Teach FitMax" onClose={() => setPanel(null)}>
+          <p className="small muted">Tap what you’re doing as you start it. Labels are stored on the hub with the raw signal (GET /api/v1/rssi/recent?seconds=300), building a dataset of your home for a model that’s tuned to it.</p>
+          <div className="chips" style={{ margin: '12px 0' }}>
+            {LABELS.map((l) => (
+              <button key={l} className="chip-toggle" onClick={() => void label(l)}>
+                {l}
+              </button>
+            ))}
+          </div>
+          {labels.slice(0, 8).map((l) => (
+            <Row key={l.at} k={l.label} v={new Date(l.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })} />
+          ))}
+        </Sheet>
+      )}
+      {panel === 'settings' && (
+        <Sheet title="Monitor settings" onClose={() => setPanel(null)}>
+          <label className="field">
+            <span>Alert if someone home hasn’t moved for</span>
+            <select className="input" value={settings.inactivityMin} onChange={(e) => updateSettings({ ...settings, inactivityMin: Number(e.target.value) })}>
+              {[15, 30, 45, 60, 90, 120, 180].map((m) => (
+                <option key={m} value={m}>
+                  {m < 60 ? `${m} min` : `${m / 60} h`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="setting">
+            <span>
+              <strong className="small">Only track me</strong>
+              <span className="tiny muted" style={{ display: 'block' }}>
+                Credit activity only when one person is sensed{me?.configured ? ' and your phone is home' : ''}. Falls still cover anyone.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              className="switch"
+              checked={onlyMe}
+              onChange={(e) => {
+                setOnlyMe(e.target.checked);
+                save(OKEY, { v: e.target.checked });
+              }}
+            />
+          </label>
+          <LayoutEditor current={v?.room} onSave={async (room, nodes) => flash((await post('layout', { room, nodes })) ? 'Layout saved on the hub' : 'Layout needs the live hub')} />
+          <button className="btn" style={{ marginTop: 12 }} onClick={() => void calibrate()}>
+            Calibrate empty room
+          </button>
+          {!demo && config?.hub && <p className="tiny muted" style={{ marginTop: 10 }}>Hub {config.hub}</p>}
+        </Sheet>
+      )}
+      {panel === 'how' && <HowSheet caps={v?.capabilities ?? null} onClose={() => setPanel(null)} />}
     </div>
   );
 }
 
-const MOTION_LABEL: Record<Minute['m'], string> = { absent: 'Away', still: 'Still', moving: 'Moving', active: 'Active', offline: 'Offline' };
+function StatusChip({ status, source, paused, links }: { status: string; source?: string; paused: string | null; links: number }) {
+  const map: Record<string, [string, string]> = {
+    demo: ['good', 'Demo day'],
+    live: ['good', `Live · ${links} link${links === 1 ? '' : 's'}${source && source !== 'rssi' ? ` · ${source}` : ''}`],
+    simulated: ['warn', 'Simulated'],
+    offline: ['bad', 'Offline'],
+    locked: ['bad', 'Token rejected'],
+    waiting: ['warn', 'Waiting'],
+    connecting: ['', 'Connecting…'],
+  };
+  const [tone, text] = map[status] ?? ['', status];
+  return (
+    <span className="status-chip">
+      <i className={`dot ${tone}`} />
+      {paused ? `Paused: ${paused}` : text}
+    </span>
+  );
+}
 
-function SourcePill({ status, source }: { status: string; source?: string }) {
-  if (status === 'live') return <span className="pill good">● Live · {source}</span>;
-  if (status === 'simulated') return <span className="pill warn">Simulated</span>;
-  if (status === 'offline') return <span className="pill bad-pill">Hub offline</span>;
-  if (status === 'locked') return <span className="pill bad-pill">Token rejected</span>;
-  if (status === 'waiting') return <span className="pill">Waiting for sensors</span>;
-  return <span className="pill">Connecting…</span>;
+function Notice({ tone, title, body, onMore }: { tone: 'warn' | 'info'; title: string; body: string; onMore?: () => void }) {
+  return (
+    <div className={`mon-note ${tone === 'warn' ? 'warn' : ''}`}>
+      <IconWifi size={18} />
+      <span>
+        <strong>{title}.</strong> {body}{' '}
+        {onMore && (
+          <button className="linklike" onClick={onMore}>
+            Help
+          </button>
+        )}
+      </span>
+    </div>
+  );
+}
+
+function LayoutEditor({ current, onSave }: { current?: [number, number]; onSave: (room: [number, number], nodes: Record<string, [number, number]>) => void }) {
+  const [w, setW] = useState(current?.[0] ?? 4);
+  const [h, setH] = useState(current?.[1] ?? 3);
+  const nodes = useMemo<Record<string, [number, number]>>(() => ({ uno: [0.3, h / 2], ap: [w - 0.3, h / 2], laptop: [w / 2, h - 0.3] }), [w, h]);
+  return (
+    <div className="layout-ed">
+      <span className="small" style={{ fontWeight: 650 }}>
+        Room & devices
+      </span>
+      <div className="row">
+        <label className="field" style={{ flex: 1 }}>
+          <span>Width (m)</span>
+          <input className="input" type="number" min={2} max={12} step={0.5} value={w} onChange={(e) => setW(Number(e.target.value))} />
+        </label>
+        <label className="field" style={{ flex: 1 }}>
+          <span>Depth (m)</span>
+          <input className="input" type="number" min={2} max={12} step={0.5} value={h} onChange={(e) => setH(Number(e.target.value))} />
+        </label>
+      </div>
+      <p className="tiny muted">Board on the left wall, phone hotspot on the right, laptop in the middle of the near wall, all about chest height.</p>
+      <button className="btn" onClick={() => onSave([w, h], nodes)}>
+        Save layout
+      </button>
+    </div>
+  );
+}
+
+function SetupCard({ onDemo }: { onDemo: () => void }) {
+  return (
+    <Bento>
+      <Widget label="Set up the hub" span={4} sub="On the board: ./setup.sh rssi → copy RUVIEW_URL and RUVIEW_API_TOKEN into apps/web/.env → restart npm run dev.">
+        <button className="btn" onClick={onDemo} style={{ alignSelf: 'flex-start' }}>
+          Watch the demo instead
+        </button>
+      </Widget>
+    </Bento>
+  );
+}
+
+const CAP_ROWS: [string, string, string][] = [
+  ['Presence', 'presence', 'Someone home or not, from motion and the link-level drop a body causes.'],
+  ['Motion & active minutes', 'motion', 'How much the links jitter vs. the empty room.'],
+  ['Reps & sets', 'rep_rhythm', 'A regular wave on one link while you train across it.'],
+  ['Where in the room', 'position_heatmap', 'Which links are disturbed, combined (radio tomography).'],
+  ['Rest & restlessness', 'sleep_restlessness', 'Long still stretches and the movements that break them.'],
+  ['Breathing', 'breathing', 'Chest motion modulates a nearby link at 0.1–0.6 Hz.'],
+  ['Falls', 'fall', 'A sudden large swing, then stillness in a new spot.'],
+  ['Radio noise', 'interference', 'Noise-floor jumps (microwave oven) pause sensing so they can’t fake motion.'],
+  ['Heart rate', 'heart_rate', 'Needs channel-state (CSI) hardware such as an ESP32-S3.'],
+];
+
+function HowSheet({ caps, onClose }: { caps: Record<string, string> | null; onClose: () => void }) {
+  return (
+    <Sheet title="What WiFi can measure" onClose={onClose} wide>
+      {CAP_ROWS.map(([name, key, how]) => (
+        <Row key={key} k={name} hint={how} v={caps?.[key] ? caps[key].split(':')[0] : key === 'heart_rate' ? 'not with RSSI' : '—'} />
+      ))}
+      <p className="tiny muted" style={{ marginTop: 10 }}>
+        Setup: board, phone hotspot and laptop in a triangle 2–4 m apart at chest height; train inside it. Metal racks and mirrors reflect WiFi, water (aquariums, people) absorbs it, wood and fabric barely matter.
+      </p>
+    </Sheet>
+  );
 }
 
 function Timeline({ minutes, at }: { minutes: Minute[]; at: number }) {
-  // Last 3 hours, one slot per minute
   const now = Math.floor(at / 60_000) * 60_000;
   const by = new Map(minutes.map((m) => [m.t, m.m]));
   const slots = Array.from({ length: 180 }, (_, i) => now - (179 - i) * 60_000);
@@ -375,6 +601,13 @@ function Timeline({ minutes, at }: { minutes: Minute[]; at: number }) {
       </div>
       <div className="row tiny muted" style={{ justifyContent: 'space-between' }}>
         <span>3 h ago</span>
+        <span className="mon-legend">
+          {(['active', 'moving', 'still', 'absent'] as const).map((m) => (
+            <span key={m}>
+              <i className={`m-${m}`} /> {m === 'absent' ? 'away' : m}
+            </span>
+          ))}
+        </span>
         <span>now</span>
       </div>
     </div>
@@ -387,11 +620,7 @@ function AlertRow({ a, onAck }: { a: Alert; onAck: () => void }) {
     <li className={`mon-alert ${a.severity} ${a.ack ? 'acked' : ''}`}>
       <div>
         <strong>{a.title}</strong>
-        <span className="tiny muted">
-          {' '}
-          · {time}
-          {a.demo && ' · simulated'}
-        </span>
+        <span className="tiny muted"> · {time}</span>
         <p className="tiny muted">{a.detail}</p>
       </div>
       {a.ack ? (
@@ -405,46 +634,4 @@ function AlertRow({ a, onAck }: { a: Alert; onAck: () => void }) {
   );
 }
 
-function Setup({ onDemo }: { onDemo: () => void }) {
-  return (
-    <>
-      <div className="mon-note">
-        <IconWifi size={18} />
-        <span>
-          <strong>No hub connected yet.</strong> Follow the steps below, or{' '}
-          <button className="linklike" onClick={onDemo}>
-            watch the live demo
-          </button>{' '}
-          to see everything it tracks.
-        </span>
-      </div>
-      <div className="grid">
-        <div className="card col-7">
-          <ol className="mon-steps">
-            <li>
-              <strong>Run RuView on the Arduino UNO Q.</strong> Copy <code>hub/uno-q</code> to the board and run <code>./setup.sh</code>. It prints the hub address and an access token.
-            </li>
-            <li>
-              <strong>Point FitMax at it.</strong> In <code>apps/web/.env</code> set <code>RUVIEW_URL=http://&lt;uno-q-ip&gt;:3000</code> and <code>RUVIEW_API_TOKEN=…</code>, then restart <code>npm run dev</code>.
-            </li>
-            <li>
-              <strong>Add sensors when you have them.</strong> Flash an ESP32-S3 with the RuView CSI firmware and point it at the hub. Until then the hub runs in simulated mode, clearly labelled here.
-            </li>
-          </ol>
-        </div>
-        <div className="card col-5">
-          <h2>What it watches</h2>
-          <ul className="list small">
-            <li>Presence and how many people are home</li>
-            <li>Movement through the day, and active minutes</li>
-            <li>Possible falls, and long stillness while someone’s home</li>
-            <li>Resting breathing and heart rate, when confident</li>
-          </ul>
-          <p className="tiny muted" style={{ marginTop: 10 }}>
-            WiFi sensing uses no camera, and all data stays on your network.
-          </p>
-        </div>
-      </div>
-    </>
-  );
-}
+export type { Live };

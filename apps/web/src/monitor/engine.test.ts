@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { acknowledge, DEFAULT_WATCH, emptyWatch, normalize, step, type Reading, type WatchState } from './engine';
+import { acknowledge, attribute, DEFAULT_WATCH, emptyWatch, normalize, step, type Reading, type WatchState } from './engine';
 
 const T0 = new Date(2026, 10, 14, 9, 0, 0).getTime();
 const health = { status: 'ok', source: 'esp32', processing: { state: 'live' } };
@@ -78,5 +78,24 @@ describe('HomeWatch', () => {
     const off = (at: number): Reading => ({ ...read(at, 'absent', false), reachable: false, live: false });
     const { raised } = run([read(T0, 'present_still'), off(T0 + 30_000), off(T0 + 120_000)]);
     expect(raised.map((a) => a.kind)).toEqual(['offline']);
+  });
+});
+
+describe('Only-me mode', () => {
+  it('credits metrics only when one person is sensed and the phone is home, but still raises falls', () => {
+    const two = { ...read(T0, 'present_moving'), persons: 2 };
+    const a = attribute(two, true, { configured: true, home: true });
+    expect(a.reason).toBe('2 people sensed');
+    expect(a.reading.heart.bpm).toBeNull();
+    const away = attribute(read(T0, 'present_moving'), true, { configured: true, home: false });
+    expect(away.reason).toBe('your phone isn’t home');
+    expect(attribute(read(T0, 'present_moving'), true, { configured: true, home: true }).reason).toBeNull();
+    expect(attribute(two, false, null).reason).toBeNull();
+
+    let st = emptyWatch(T0);
+    for (let i = 0; i <= 60; i++) st = step(st, attribute({ ...read(T0 + i * 10_000, 'present_moving'), persons: 2 }, true, null).reading).state;
+    expect(st.activeMs).toBe(0);
+    const fall = step(st, attribute({ ...read(T0 + 700_000, 'present_still'), persons: 2, fall: true }, true, null).reading);
+    expect(fall.raised.map((x) => x.kind)).toEqual(['fall']);
   });
 });

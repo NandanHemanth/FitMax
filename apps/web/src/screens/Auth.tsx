@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react';
+import { useState } from 'react';
 import {
   cmToFtIn,
   DIETS,
@@ -10,127 +10,38 @@ import {
   kgToLb,
   lbToKg,
   type Goal,
-  type HealthPermission,
-  type HealthSource,
   type Intensity,
   type Profile,
   type Session,
   type Sex,
   type Units,
 } from '../state/profile';
-import { IconBolt, IconDumbbell, IconHeart, IconLeaf, IconMoon, IconShield, IconSteps, IconTarget } from '../ui/icons';
+import { quickSession } from '../state/profile';
+import { IconBolt, IconHeart, IconShield } from '../ui/icons';
 
 /* ------------------------------------------------------------------ */
 /* Sign in (demo) + fitness data permissions                           */
 /* ------------------------------------------------------------------ */
 
-const PERMS: { id: HealthPermission; label: string; why: string; icon: ReactElement }[] = [
-  { id: 'steps', label: 'Steps & activity', why: 'Weekly active minutes vs the WHO target', icon: <IconSteps /> },
-  { id: 'heart', label: 'Heart rate', why: 'Resting heart rate trend and readiness', icon: <IconHeart /> },
-  { id: 'workouts', label: 'Workouts', why: 'Count runs, rides and lifts toward your goal', icon: <IconDumbbell /> },
-  { id: 'sleep', label: 'Sleep', why: 'Recovery before hard sessions', icon: <IconMoon /> },
-  { id: 'weight', label: 'Body weight', why: 'Progress toward your target weight', icon: <IconTarget /> },
-  { id: 'nutrition', label: 'Nutrition', why: 'Sync meals you log elsewhere', icon: <IconLeaf /> },
-];
-
-const PROVIDER: Record<HealthSource, { app: string; account: string }> = {
-  google: { app: 'Google Fit', account: 'Google' },
-  apple: { app: 'Apple Health', account: 'Apple' },
-};
-
 export function SignIn({ onSignedIn }: { onSignedIn: (s: Session) => void }) {
-  const [provider, setProvider] = useState<HealthSource | null>(null);
-  const [perms, setPerms] = useState<Record<HealthPermission, boolean>>({
-    steps: true,
-    heart: true,
-    workouts: true,
-    sleep: true,
-    weight: true,
-    nutrition: false,
-  });
-
-  const finish = (p: HealthSource, grant: boolean) =>
-    onSignedIn({
-      provider: p,
-      displayName: '',
-      permissions: grant ? perms : { steps: false, heart: false, workouts: false, sleep: false, weight: false, nutrition: false },
-      signedInAt: new Date().toISOString(),
-    });
-
   return (
-    <div className="auth">
-      <section className="auth-hero">
+    <div className="auth auth-min">
+      <div className="auth-box">
         <div className="brand">
           <img src="/logo.svg" alt="" /> FitMax
         </div>
-        <div>
-          <h1>Fitness that fits where you live.</h1>
-          <p>
-            A coach that watches every rep, plans meals around your goal, and finds the homes and neighbourhoods that make training
-            easy.
-          </p>
-        </div>
-        <div className="hero-stats">
-          <div>
-            <strong>31%</strong>
-            <span>of adults worldwide don't get enough activity (WHO, 2022)</span>
-          </div>
-          <div>
-            <strong>66 days</strong>
-            <span>median time for a new habit to stick (Lally et al., 2010)</span>
-          </div>
-          <div>
-            <strong>On device</strong>
-            <span>your camera never leaves your phone</span>
-          </div>
-        </div>
-      </section>
-
-      <section className="auth-panel">
-        {!provider ? (
-          <div className="auth-box">
-            <p className="eyebrow">Get started</p>
-            <h1>Welcome to FitMax</h1>
-            <p className="muted">Sign in with the account that holds your fitness data.</p>
-            <button className="provider-btn" onClick={() => setProvider('google')}>
-              <GoogleMark /> Continue with Google
-            </button>
-            <button className="provider-btn dark" onClick={() => setProvider('apple')}>
-              <AppleMark /> Continue with Apple
-            </button>
-            <div className="divider">demo build</div>
-            <p className="tiny muted">
-              <IconShield size={14} style={{ verticalAlign: '-2px' }} /> Sign-in is simulated for this demo: no account is created and nothing leaves this
-              device. Health data shown is simulated until HealthKit and Health Connect are connected.
-            </p>
-          </div>
-        ) : (
-          <div className="auth-box">
-            <p className="eyebrow">Connect {PROVIDER[provider].app}</p>
-            <h1>Let FitMax read your fitness data</h1>
-            <p className="muted">Choose what to share. You can change this any time in Profile.</p>
-            <div className="card" style={{ padding: '6px 16px' }}>
-              {PERMS.map((p) => (
-                <label key={p.id} className="perm">
-                  <span className="ico">{p.icon}</span>
-                  <span style={{ flex: 1 }}>
-                    <strong>{p.label}</strong>
-                    <br />
-                    <span className="small muted">{p.why}</span>
-                  </span>
-                  <input type="checkbox" className="switch" checked={perms[p.id]} onChange={(e) => setPerms({ ...perms, [p.id]: e.target.checked })} />
-                </label>
-              ))}
-            </div>
-            <button className="btn btn-primary btn-lg btn-block" onClick={() => finish(provider, true)}>
-              Allow and continue
-            </button>
-            <button className="btn btn-ghost btn-block" onClick={() => finish(provider, false)}>
-              Not now
-            </button>
-          </div>
-        )}
-      </section>
+        <h1>Train smarter where you live.</h1>
+        <p className="muted">Form coach, home sensing, and a 3D gym planner for any home.</p>
+        <button className="provider-btn" onClick={() => onSignedIn(quickSession('google'))}>
+          <GoogleMark /> Continue with Google
+        </button>
+        <button className="provider-btn dark" onClick={() => onSignedIn(quickSession('apple'))}>
+          <AppleMark /> Continue with Apple
+        </button>
+        <p className="tiny muted auth-note">
+          <IconShield size={13} /> Demo sign-in. You stay signed in on this laptop and any phone you open it on.
+        </p>
+      </div>
     </div>
   );
 }

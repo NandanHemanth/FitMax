@@ -1,0 +1,6 @@
+
+# placeholder sign-in kept on the laptop
+apps/web/.data/
+
+# CoStar hackathon kit: sponsor data, too big for GitHub
+costar-hackathon-kit*/

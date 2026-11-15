@@ -143,3 +143,53 @@ export function computeTargets(p: Profile): Targets {
 }
 
 export const bmi = (p: Profile) => p.weightKg / (p.heightCm / 100) ** 2;
+
+
+// ---------- placeholder sign-in ----------
+/** One-tap demo sign-in: everything shared, no permission screen. */
+export function quickSession(provider: HealthSource): Session {
+  return {
+    provider,
+    displayName: '',
+    permissions: { steps: true, heart: true, workouts: true, sleep: true, weight: true, nutrition: true },
+    signedInAt: new Date().toISOString(),
+  };
+}
+
+/** A sensible starting profile so nobody has to fill a form to see the app. Editable in Profile. */
+export function defaultProfile(name = 'Nandan'): Profile {
+  return {
+    name,
+    sex: 'male',
+    age: 24,
+    heightCm: 178,
+    weightKg: 75,
+    targetWeightKg: 72,
+    units: 'imperial',
+    goal: 'build_muscle',
+    experienceYears: 2,
+    intensity: 'moderate',
+    daysPerWeek: 4,
+    injuries: [],
+    injuryNotes: '',
+    diet: [],
+    createdAt: new Date().toISOString(),
+  };
+}
+
+/** Mirror sign-in + profile to the laptop (dev server) so every browser starts signed in. */
+export async function syncMe(session: Session | null, profile: Profile | null) {
+  try {
+    await fetch('/api/profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session, profile }) });
+  } catch {
+    /* offline or static build: localStorage still has it */
+  }
+}
+export async function fetchMe(): Promise<{ session?: Session | null; profile?: Profile | null }> {
+  try {
+    const r = await fetch('/api/profile', { cache: 'no-store' });
+    return r.ok ? await r.json() : {};
+  } catch {
+    return {};
+  }
+}

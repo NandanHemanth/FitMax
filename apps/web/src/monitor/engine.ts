@@ -16,6 +16,8 @@ export interface RvSensing {
   estimated_persons?: number;
   features?: { motion_band_power?: number; breathing_band_power?: number; mean_rssi?: number };
   nodes?: { node_id: number | string; rssi_dbm?: number; subcarrier_count?: number }[];
+  /** FitMax RSSI hub only: rhythm detector for repetitive exercise */
+  exercise?: { periodic?: boolean; cadence_per_min?: number | null; reps?: number };
 }
 export interface RvVitals {
   authority?: string;
@@ -59,6 +61,8 @@ export interface Reading {
   heart: Vital;
   fall: boolean;
   nodes: { id: string; rssi: number | null }[];
+  /** False when Only-me mode can't confirm this is you: metrics aren't credited, safety alerts still run. */
+  attributable?: boolean;
 }
 
 export const motionFrom = (level: string | undefined, presence: boolean): Motion => {
@@ -161,10 +165,11 @@ export function step(prev: WatchState, r: Reading, s: WatchSettings = DEFAULT_WA
   if (r.reachable && r.live) {
     st.lastSeenAt = r.at;
     clear('offline');
-    if (r.presence) st.presentMs += dt;
+    const mine = r.attributable !== false;
+    if (r.presence && mine) st.presentMs += dt;
     const moving = r.motion === 'moving' || r.motion === 'active';
     if (moving) {
-      st.activeMs += dt;
+      if (mine) st.activeMs += dt;
       st.lastMoveAt = r.at;
     } else if (!r.presence) {
       st.lastMoveAt = null; // nobody home: inactivity clock doesn't run
@@ -183,7 +188,7 @@ export function step(prev: WatchState, r: Reading, s: WatchSettings = DEFAULT_WA
 
     // Vitals, only when RuView is confident enough to publish them
     const check = (kind: 'breathing' | 'heart', v: Vital, [lo, hi]: [number, number], unit: string, label: string) => {
-      if (v.bpm == null || (v.confidence ?? 0) < s.minConfidence || moving) return; // resting values only
+      if (!mine || v.bpm == null || (v.confidence ?? 0) < s.minConfidence || moving) return; // your resting values only
       if (v.bpm < lo || v.bpm > hi) raise(kind, 'warn', `${label} ${Math.round(v.bpm)} ${unit}`, `Outside the resting range you set (${lo}–${hi}). WiFi estimates are approximate: confirm with a wearable.`);
       else clear(kind);
     };
@@ -212,4 +217,15 @@ export function acknowledge(st: WatchState, id: string): WatchState {
   const open = { ...st.open };
   for (const k of Object.keys(open) as Alert['kind'][]) if (open[k] === id) delete open[k];
   return { ...st, open, alerts: st.alerts.map((a) => (a.id === id ? { ...a, ack: true } : a)) };
+}
+
+export type MeStatus = { configured: boolean; home: boolean | null };
+
+/** Only-me gate: credit metrics to you only when exactly one person is sensed and your phone is home. */
+export function attribute(r: Reading, onlyMe: boolean, me: MeStatus | null): { reading: Reading; reason: string | null } {
+  if (!onlyMe || !r.presence) return { reading: { ...r, attributable: true }, reason: null };
+  const reason = r.persons > 1 ? `${r.persons} people sensed` : me?.configured && me.home === false ? 'your phone isn’t home' : null;
+  if (!reason) return { reading: { ...r, attributable: true }, reason: null };
+  const hide = { bpm: null, confidence: null, abstained: `Paused: ${reason}` };
+  return { reading: { ...r, attributable: false, breathing: hide, heart: hide }, reason };
 }

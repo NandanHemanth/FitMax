@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # FitMax home hub: runs RuView (WiFi sensing server) on an Arduino UNO Q (Debian, arm64).
 #
+#   ./setup.sh rssi                     # NO extra hardware: senses motion from this board's own WiFi signal
 #   ./setup.sh                          # simulated mode (no sensors yet), clearly labelled in FitMax
 #   ./setup.sh esp32                    # real sensing: ESP32-S3 nodes stream WiFi CSI to this board
 #   ./setup.sh esp32 --home-assistant   # + local MQTT broker so Home Assistant auto-discovers the sensors
 #                                       #   (then HA → Google Home / Apple Home / Alexa via Matter or HomeKit)
 #   ./setup.sh esp32 --privacy          # never output heart rate, breathing rate or body pose
+#   ./setup.sh ble                      # optional: Bluetooth LE advertising for a 3rd sensing link
 #   ./setup.sh status | logs | stop
 #
 # Safe to re-run: keeps the same access token, replaces the containers.
@@ -38,13 +40,27 @@ need_docker() {
 }
 
 case "${1:-}" in
+  ble)
+    # Make this board advertise over Bluetooth LE so the laptop agent can measure the board<->laptop link
+    command -v btmgmt >/dev/null || sudo apt-get install -y -qq bluez >/dev/null
+    sudo btmgmt power on >/dev/null; sudo btmgmt le on >/dev/null; sudo btmgmt connectable on >/dev/null; sudo btmgmt advertising on >/dev/null
+    ADDR="$(sudo btmgmt info 2>/dev/null | awk '/addr/ {print $2; exit}')"
+    say "Bluetooth LE advertising is on. Board address: ${ADDR:-unknown}"
+    echo "  Add to FitMax/apps/web/.env on the laptop:  FITMAX_BLE_PEER=${ADDR}"
+    echo "  and on the laptop once:  pip install --user bleak"
+    exit 0 ;;
   status) curl -fsS "http://127.0.0.1:3000/health" && echo; exit $? ;;
-  logs) need_docker; exec $DOCKER logs -f --tail 100 "$NAME" ;;
-  stop) need_docker; $DOCKER rm -f "$NAME" fitmax-mqtt >/dev/null 2>&1 || true; say "Stopped."; exit 0 ;;
+  logs)
+    if systemctl is-active --quiet fitmax-rssi 2>/dev/null; then exec sudo journalctl -fu fitmax-rssi; fi
+    need_docker; exec $DOCKER logs -f --tail 100 "$NAME" ;;
+  stop)
+    sudo systemctl disable --now fitmax-rssi >/dev/null 2>&1 || true
+    if command -v docker >/dev/null 2>&1; then need_docker; $DOCKER rm -f "$NAME" fitmax-mqtt >/dev/null 2>&1 || true; fi
+    say "Stopped."; exit 0 ;;
 esac
 
 MODE="${1:-simulated}"
-[[ "$MODE" == simulated || "$MODE" == esp32 ]] || die "Mode must be 'simulated' or 'esp32' (got '$MODE')."
+[[ "$MODE" == simulated || "$MODE" == esp32 || "$MODE" == rssi ]] || die "Mode must be 'rssi', 'simulated' or 'esp32' (got '$MODE')."
 shift || true
 HA=0
 EXTRA=()
@@ -57,13 +73,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$(uname -m)" == aarch64 || "$(uname -m)" == x86_64 ]] || die "Unsupported CPU: $(uname -m)"
-need_docker
+[[ "$MODE" == rssi ]] || need_docker
 
 # --- Network facts ------------------------------------------------------------
-IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
-if [[ -z "$IP" ]] && command -v ip >/dev/null; then
+# The address other devices reach us on: the interface with the default route, never a Docker bridge
+IP=""
+if command -v ip >/dev/null; then
   IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' || true)"
+  [[ -n "$IP" ]] || IP="$(ip -4 -o addr show 2>/dev/null | awk '$2 !~ /^(lo|docker|br-|veth|virbr)/ {split($4,a,"/"); print a[1]; exit}' || true)"
 fi
+[[ -n "$IP" ]] || IP="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^172\.17\.' | head -1 || true)"
 [[ -n "$IP" ]] || die "No network address. Connect the UNO Q to WiFi first (App Lab → Settings → Network)."
 HOST="$(hostname)"
 SUBNET=""   # LAN subnet the ESP32 nodes send from, e.g. 192.168.1.0/24
@@ -82,6 +101,55 @@ MQTT_PASSWORD=""
 if [[ $HA == 1 ]]; then
   MQTT_PASSWORD="$(env_get MQTT_PASSWORD)"
   [[ -n "$MQTT_PASSWORD" ]] || { MQTT_PASSWORD="$(rand_hex 16)"; env_put MQTT_PASSWORD "$MQTT_PASSWORD"; }
+fi
+
+# --- RSSI mode: no Docker, no extra hardware -------------------------------------
+if [[ "$MODE" == rssi ]]; then
+  [[ $HA == 0 ]] || die "--home-assistant needs RuView (simulated/esp32 modes) for now."
+  say "Installing RSSI sensing (python3, iw, ping)…"
+  command -v iw >/dev/null && command -v ping >/dev/null && command -v python3 >/dev/null || sudo apt-get install -y -qq python3 iw iputils-ping >/dev/null
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then docker rm -f "$NAME" fitmax-mqtt >/dev/null 2>&1 || true; fi
+  sudo install -d /opt/fitmax
+  sudo install -m 0755 "$HERE/rssi_sense.py" /opt/fitmax/rssi_sense.py
+  printf 'RUVIEW_API_TOKEN=%s\n' "$TOKEN" | sudo tee /opt/fitmax/rssi.env >/dev/null
+  sudo chmod 600 /opt/fitmax/rssi.env
+  sudo tee /etc/systemd/system/fitmax-rssi.service >/dev/null <<UNIT
+[Unit]
+Description=FitMax RSSI WiFi sensing
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/opt/fitmax/rssi.env
+ExecStart=/usr/bin/python3 /opt/fitmax/rssi_sense.py serve --port 3000 --name uno
+Restart=always
+User=nobody
+AmbientCapabilities=CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now fitmax-rssi >/dev/null
+  sudo systemctl restart fitmax-rssi
+  for _ in $(seq 1 15); do curl -fsS http://127.0.0.1:3000/health >/dev/null 2>&1 && break; sleep 1; done
+  curl -fsS http://127.0.0.1:3000/health >/dev/null 2>&1 || { sudo journalctl -u fitmax-rssi -n 30 --no-pager; die "RSSI sensing didn't start. Logs above."; }
+  echo
+  echo "  ✓ RSSI sensing is running on this UNO Q (no extra hardware)"
+  echo
+  echo "  Paste these two lines into FitMax/apps/web/.env on your laptop, then restart npm run dev:"
+  echo
+  echo "      RUVIEW_URL=http://$IP:3000"
+  echo "      RUVIEW_API_TOKEN=$TOKEN"
+  echo
+  echo "  Each pair of devices is a sensing link. Put the board, the phone hotspot and the laptop"
+  echo "  in a triangle 2–4 m apart at about chest height, and train inside the triangle."
+  echo "  The laptop joins as the 2nd link automatically when you run npm run dev (or: npm run agent)."
+  echo "  Then leave the room for 15 s and press Calibrate in FitMax → Monitor."
+  echo "  Optional 3rd link over Bluetooth: ./setup.sh ble"
+  echo "  Starts on boot. Check: ./setup.sh status · Logs: ./setup.sh logs · Stop: ./setup.sh stop"
+  echo
+  exit 0
 fi
 
 # --- Run ------------------------------------------------------------------------
