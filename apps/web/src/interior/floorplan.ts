@@ -10,6 +10,8 @@
 export interface Home {
   id: number;
   mp: string | null;
+  /** Matterport still serves this scan (checked by scripts/check-tours.py) */
+  mpOk?: boolean;
   addr: string;
   city: string;
   st: string;

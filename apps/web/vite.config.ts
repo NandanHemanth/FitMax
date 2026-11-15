@@ -23,7 +23,7 @@ function aiApi(): Plugin {
     server.middlewares.use('/api/ruview', (req, res) => void handleRuview(req, res));
     server.middlewares.use('/api/vexcel', (req, res) => void handleVexcel(req, res));
     server.middlewares.use('/api/me', (req, res) => void handlePresence(req, res));
-    server.middlewares.use('/api/matterport', (req, res) => handleMatterport(req, res));
+    server.middlewares.use('/api/matterport', (req, res) => void handleMatterport(req, res));
     server.middlewares.use('/api/profile', (req, res) => void handleProfile(req, res));
     server.middlewares.use('/api/agent', (_req, res) => {
       const r = res as { setHeader: (k: string, v: string) => void; end: (s: string) => void };

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { recommend, roomBox, score, place, uid, type Item, type Mode, type Rot } from '../interior/engine';
+import { TourStage, type TourGear } from '../interior/TourStage';
 import { makePlan, trainingCandidates, type Home, type PlanRoom } from '../interior/floorplan';
 import { Scene, type SceneHandle } from '../interior/Scene';
 import { ERGO_NOTES, THINGS, thing, type Thing } from '../interior/things';
@@ -54,7 +55,7 @@ export function Interior() {
   const [q, setQ] = useState('');
   const [wifi, setWifi] = useState(true);
   const [mpKey, setMpKey] = useState<string | null>(null);
-  const [useKey, setUseKey] = useState(true);
+  const [tour, setTour] = useState<{ state: 'checking' | 'loading' | 'ready' | 'slow' | 'gone' | 'plain'; why?: string }>({ state: 'checking' });
   const scene = useRef<SceneHandle>(null);
 
   // CoStar listings (Houston + LA homes on the Matterport capture list)
@@ -74,7 +75,7 @@ export function Interior() {
         }
         let h = fromPlaces ? null : hs.find((x) => x.id === last) ?? null;
         if (!h && fromPlaces) h = [...hs].sort((a, b) => Math.hypot(a.lat - fromPlaces.lat, a.lng - fromPlaces.lng) - Math.hypot(b.lat - fromPlaces.lat, b.lng - fromPlaces.lng))[0];
-        setHome(h ?? hs.find((x) => x.garage && x.beds >= 3 && x.city === 'Houston') ?? hs[0]);
+        setHome(h ?? hs.find((x) => x.mpOk && x.garage && x.beds >= 3 && x.city === 'Houston') ?? hs.find((x) => x.mpOk) ?? hs[0]);
       })
       .catch(() => setHomes([]));
     void fetch('/api/matterport/config')
@@ -153,10 +154,47 @@ export function Interior() {
     a.click();
   };
 
+  // Opening the tour: confirm Matterport still serves the scan, then time the load
+  useEffect(() => {
+    if (panel !== 'tour' || !home?.mp) return;
+    let off = false;
+    setTour({ state: 'checking' });
+    void fetch(`/api/matterport/check?m=${home.mp}`)
+      .then((r) => r.json())
+      .then((c: { ok: boolean | null; status: string }) => {
+        if (off) return;
+        if (c.ok === false) {
+          setTour({ state: 'gone', why: c.status });
+          setHomes((hs) => hs?.map((x) => (x.id === home.id ? { ...x, mpOk: false } : x)) ?? hs);
+        } else setTour({ state: 'loading' });
+      })
+      .catch(() => !off && setTour({ state: 'loading' }));
+    return () => {
+      off = true;
+    };
+  }, [panel, home?.mp, home?.id]);
+
+  // Gym equipment you've placed anywhere in this home, for pinning inside the real tour
+  const tourGear = useMemo<TourGear[]>(() => {
+    const out: TourGear[] = [];
+    for (const list of Object.values(items))
+      for (const it of list) {
+        const t = THINGS.find((x) => x.key === it.key);
+        if (t && t.cat === 'gym') out.push({ name: t.name, w: t.w, d: t.d, color: t.color, clearance: t.clear.back ? `keep ${t.clear.back} m clear behind` : undefined });
+      }
+    return out.slice(0, 10);
+  }, [items]);
+
+  const nextTourHome = () => {
+    if (!homes || !home) return;
+    const near = homes.filter((x) => x.mpOk && x.id !== home.id).sort((a, b) => Math.hypot(a.lat - home.lat, a.lng - home.lng) - Math.hypot(b.lat - home.lat, b.lng - home.lng))[0];
+    if (near) setHome(near);
+  };
+
   const filtered = useMemo(() => {
     if (!homes) return [];
     const s = q.trim().toLowerCase();
-    const list = s ? homes.filter((h) => `${h.addr} ${h.city} ${h.st}`.toLowerCase().includes(s)) : homes.filter((h) => h.gym || (h.garage && h.beds >= 3));
+    const list = s ? homes.filter((h) => `${h.addr} ${h.city} ${h.st}`.toLowerCase().includes(s)) : homes.filter((h) => h.mpOk !== false && (h.gym || (h.garage && h.beds >= 3)));
     return list.slice(0, 40);
   }, [homes, q]);
 
@@ -319,7 +357,7 @@ export function Interior() {
         <Sheet title="CoStar homes (Houston & LA)" onClose={() => setPanel(null)} wide>
           <input className="input" placeholder="Search address or city" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
           <p className="tiny muted" style={{ margin: '8px 0' }}>
-            {q ? `${filtered.length} matches` : 'Homes with a gym, or a garage and 3+ bedrooms'} · {fmt(homes.length)} homes with Matterport scans
+            {q ? `${filtered.length} matches` : 'Homes with a live 3D tour and a gym, or a garage and 3+ bedrooms'} · {fmt(homes.filter((h) => h.mpOk).length)} of {fmt(homes.length)} scans still live on Matterport
           </p>
           <div className="home-list">
             {filtered.map((h) => (
@@ -331,6 +369,7 @@ export function Interior() {
                     {h.city} · {h.beds} bd · {h.baths} ba · {fmt(h.sqft)} sq ft{h.garage ? ' · garage' : ''}
                   </small>
                 </span>
+                {h.mpOk && <span className="pill">3D</span>}
                 {h.gym && <span className="pill accent">gym</span>}
               </button>
             ))}
@@ -383,27 +422,37 @@ export function Interior() {
       )}
       {panel === 'tour' && home.mp && (
         <Sheet title="Real 3D tour (Matterport)" onClose={() => setPanel(null)} wide>
-          <iframe
-            className="mp-tour"
-            title="Matterport tour"
-            key={`${home.mp}-${useKey}`}
-            src={`https://my.matterport.com/show/?m=${home.mp}&play=1&qs=1${useKey && mpKey ? `&applicationKey=${mpKey}` : ''}`}
-            allow="xr-spatial-tracking; fullscreen"
-            allowFullScreen
-          />
-          <p className="small" style={{ marginTop: 8 }}>
-            {mpKey && (
-              <button className="linklike" onClick={() => setUseKey((v) => !v)}>
-                {useKey ? 'Try without the SDK key' : 'Try with the SDK key'}
+          {tour.state === 'gone' ? (
+            <div className="mp-tour mp-msg">
+              <strong>Matterport no longer serves this scan</strong>
+              <span>{tour.why}. The listing was likely sold or taken down.</span>
+              <button className="btn btn-primary" onClick={nextTourHome}>
+                Open the nearest home with a live tour
               </button>
-            )}
-            {' · '}Slow on a hotspot (20–30 s).{' '}
-            <a href={`https://my.matterport.com/show/?m=${home.mp}&play=1${useKey && mpKey ? `&applicationKey=${mpKey}` : ''}`} target="_blank" rel="noreferrer">
+            </div>
+          ) : (
+            <div className="mp-wrap">
+              {tour.state !== 'checking' && (
+                <TourStage key={home.mp} model={home.mp} sdkKey={mpKey} gear={tourGear} onState={(st, why) => setTour((t) => (t.state === 'gone' ? t : { state: st, why }))} />
+              )}
+              {(tour.state === 'checking' || tour.state === 'loading' || tour.state === 'slow') && (
+                <div className="mp-msg mp-over">
+                  <span className="spinner" />
+                  <span>{tour.state === 'checking' ? 'Checking the scan…' : tour.state === 'slow' ? 'Still loading. Matterport sends 20–40 MB, slow on a hotspot.' : 'Loading the 3D tour…'}</span>
+                  {tour.state === 'slow' && (
+                    <a className="btn" href={`https://my.matterport.com/show/?m=${home.mp}&play=1&qs=1`} target="_blank" rel="noreferrer">
+                      Open in a new tab
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {tour.state === 'plain' && tour.why && <p className="tiny muted" style={{ marginTop: 6 }}>{tour.why}</p>}
+          <p className="small" style={{ marginTop: 8 }}>
+            <a href={`https://my.matterport.com/show/?m=${home.mp}&play=1&qs=1`} target="_blank" rel="noreferrer">
               Open in a new tab
             </a>
-          </p>
-          <p className="tiny muted" style={{ marginTop: 4 }}>
-            “Model not available” = Matterport won’t serve this scan (off-market, private, or removed): pick another home. CoStar captured this one ({home.mp}). Walk it to check the rooms, then design them here. Placing FitMax’s 3D equipment inside the tour itself uses Matterport’s SDK Bundle (Scene API), the next step once the SDK domain is approved.
           </p>
         </Sheet>
       )}

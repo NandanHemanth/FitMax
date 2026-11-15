@@ -181,3 +181,11 @@
 /* Background camera: kept rendering (so frames decode) but invisible and untouchable */
 .pip-hidden { position: fixed; left: -10000px; top: 0; width: 160px; height: 120px; opacity: 0; pointer-events: none; overflow: hidden; }
 .pip-hidden .heartcam-pip { width: 160px; height: 120px; }
+
+.mp-wrap { position: relative; }
+.mp-msg { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 20px; color: #fff; background: #111; }
+.mp-over { position: absolute; inset: 0; border-radius: var(--radius-sm); background: rgb(17 17 17 / 0.92); }
+.spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid rgb(255 255 255 / 0.25); border-top-color: #fff; animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.mp-bar { position: absolute; left: 10px; right: 10px; bottom: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 10px; border-radius: 12px; background: rgb(17 17 17 / 0.78); color: #fff; backdrop-filter: blur(6px); }
+.mp-bar .btn { min-height: 34px; padding: 4px 12px; }

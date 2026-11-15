@@ -41,8 +41,8 @@ export async function askAi<T>(task: AiTask, payload: { image?: string; profile:
   return data.result as T;
 }
 
-/** Reads an image file and downsizes it to a JPEG data URL (max 1024 px) to keep requests small. */
-export async function fileToDataUrl(file: File, max = 1024): Promise<string> {
+/** Reads an image file and downsizes it to a JPEG data URL (max 768 px) to keep requests small. */
+export async function fileToDataUrl(file: File, max = 768): Promise<string> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement('canvas');
