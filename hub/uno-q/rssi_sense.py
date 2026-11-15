@@ -202,19 +202,36 @@ class BleSampler:
         import asyncio
         from bleak import BleakScanner
 
+        seen = {"peer": False, "warned": 0.0}
+
         def cb(dev, adv):
             if dev.address.upper() == self.peer:
                 self.value, self.at = float(adv.rssi), time.time()
+                if not seen["peer"]:
+                    seen["peer"] = True
+                    print(f"BLE: hearing {self.peer} ({adv.rssi} dBm)", file=sys.stderr, flush=True)
 
         async def main():
+            start = time.time()
             async with BleakScanner(cb):
                 while True:
                     await asyncio.sleep(1)
+                    quiet = time.time() - (self.at or start)
+                    if quiet > 15 and time.time() - seen["warned"] > 60:
+                        seen["warned"] = time.time()
+                        seen["peer"] = False
+                        print(f"BLE: no adverts from {self.peer} for {int(quiet)} s. On the board run ./setup.sh ble and check the address matches FITMAX_BLE_PEER.", file=sys.stderr, flush=True)
+                    if quiet > 30:
+                        return  # restart the scanner; BlueZ scans sometimes stall
 
-        try:
-            asyncio.run(main())
-        except Exception as e:
-            self.error = f"BLE scan failed: {e}"
+        while True:  # keep scanning forever, restarting after errors or stalls
+            try:
+                asyncio.run(main())
+                self.error = None
+            except Exception as e:
+                self.error = f"BLE scan failed: {e}"
+                print(f"{self.error}; retrying in 5 s", file=sys.stderr, flush=True)
+            time.sleep(5)
 
     def sample(self):
         return self.value if time.time() - self.at < 2.0 else None
