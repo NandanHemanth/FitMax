@@ -159,3 +159,25 @@
 }
 .dash-ring { display: grid; place-items: center; flex: 1; padding: 8px 0; }
 .widget .chart, .widget svg.bars { width: 100%; }
+
+/* ---------- webcam heart rate ---------- */
+.heartcam { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.heartcam-video { position: relative; border-radius: var(--radius-sm); overflow: hidden; background: #000; aspect-ratio: 4 / 3; }
+.heartcam-video video, .heartcam-video canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.heartcam-video video { transform: scaleX(-1); }
+.heartcam-msg { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-weight: 600; }
+.heartcam-read { display: grid; gap: 8px; }
+.heartcam-read .w-value { font-size: 56px; }
+.heartcam-read .spark { width: 100%; height: 46px; }
+@media (max-width: 700px) { .heartcam { grid-template-columns: 1fr; } }
+.pip { position: fixed; right: 16px; bottom: 16px; z-index: 70; width: 168px; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 30px rgb(0 0 0 / 0.35); border: 2px solid var(--danger); background: #000; }
+.heartcam-pip { position: relative; aspect-ratio: 4 / 3; }
+.heartcam-pip video, .heartcam-pip canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.heartcam-pip video { transform: scaleX(-1); }
+.pip-bpm { position: absolute; left: 6px; bottom: 6px; background: rgb(0 0 0 / 0.6); color: #fff; font-weight: 750; font-size: 13px; padding: 2px 8px; border-radius: 999px; }
+.pip-x { position: absolute; right: 4px; top: 4px; width: 24px; height: 24px; border-radius: 50%; border: 0; background: rgb(0 0 0 / 0.6); color: #fff; font-size: 16px; line-height: 1; }
+@media (max-width: 760px) { .pip { bottom: 84px; width: 120px; } }
+
+/* Background camera: kept rendering (so frames decode) but invisible and untouchable */
+.pip-hidden { position: fixed; left: -10000px; top: 0; width: 160px; height: 120px; opacity: 0; pointer-events: none; overflow: hidden; }
+.pip-hidden .heartcam-pip { width: 160px; height: 120px; }

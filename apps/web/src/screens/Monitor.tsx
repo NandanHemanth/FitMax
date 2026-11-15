@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { demoFrame, type Live } from '../monitor/demo';
 import { acknowledge, attribute, DEFAULT_WATCH, emptyWatch, normalize, step, dayKey, type Alert, type MeStatus, type Minute, type Reading, type RvEdge, type RvHealth, type RvVitals, type WatchSettings, type WatchState } from '../monitor/engine';
 import { LinkScope, RoomView, scopeColor } from '../monitor/RoomView';
@@ -6,6 +6,7 @@ import { fromDemo, fromHub, kcalPerSecond, metFor, type HubSensing, type MonView
 import { useApp } from '../state/app';
 import { IconAlert, IconCheck, IconHeart, IconMoon, IconPulse, IconShield, IconWifi } from '../ui/icons';
 import { Bento, Ring, Row, Sheet, Spark, Widget } from '../ui/widgets';
+import { vitals } from '../vitals/store';
 
 const POLL_MS = 1000;
 const DEMO_MS = 100;
@@ -52,7 +53,7 @@ async function post<T>(path: string, body: unknown): Promise<T | null> {
 
 type Config = { configured: boolean; hub: string | null } | null;
 type Mode = 'demo' | 'hub';
-type Panel = null | 'room' | 'signal' | 'reps' | 'vitals' | 'safety' | 'settings' | 'record' | 'rest' | 'how';
+type Panel = null | 'room' | 'signal' | 'reps' | 'vitals' | 'safety' | 'settings' | 'record' | 'rest' | 'how' | 'heart';
 const pushN = (a: number[], v: number, n = HIST) => (a.length >= n ? [...a.slice(1), v] : [...a, v]);
 const mins = (s: number) => Math.round(s / 60);
 
@@ -84,6 +85,12 @@ export function Monitor() {
     return k.day === dayKey(Date.now()) ? k.kcal : 0;
   });
   const [labels, setLabels] = useState<{ label: string; at: number }[]>([]);
+  const cam = useSyncExternalStore(vitals.subscribe, vitals.get);
+  useEffect(() => vitals.autoStart(), []);
+  const hr = cam.last;
+  const hrLive = cam.hr;
+  // Breathing: whichever source is surer right now, the camera (shoulders) or WiFi (links)
+  const camBreath = cam.on && cam.breath?.bpm && Date.now() - cam.breath.at < 10_000 ? cam.breath : null;
   const onlyMeRef = useRef(onlyMe);
   onlyMeRef.current = onlyMe;
   const meRef = useRef(me);
@@ -301,7 +308,7 @@ export function Monitor() {
       ) : (
         <Bento>
           <Widget label="Room" icon={<IconWifi />} span={2} tall live={status === 'live' || demo} onOpen={() => setPanel('room')} badge={<span className="pill">{v?.zone ?? v?.activity ?? '…'}</span>}>
-            {v ? <RoomView nodes={v.nodes} links={v.links} field={v.field} position={v.position} room={v.room} presence={v.presence} label={!v.presence ? (status === 'offline' ? 'Offline' : 'Nobody here') : undefined} /> : <div className="rv-skel" />}
+            {v ? <RoomView nodes={v.nodes} links={v.links} field={v.presence ? v.field : null} position={v.position} room={v.room} presence={v.presence} label={!v.presence ? (status === 'offline' ? 'Offline' : 'Nobody here') : undefined} /> : <div className="rv-skel" />}
           </Widget>
 
           <Widget label="Signal" icon={<IconPulse />} span={2} onOpen={() => setPanel('signal')} badge={<span className="pill">{series.length} links</span>}>
@@ -331,12 +338,33 @@ export function Monitor() {
           <Widget
             label="Breathing"
             icon={<IconHeart />}
-            value={v?.breathing.bpm ? Math.round(v.breathing.bpm) : '—'}
-            unit={v?.breathing.bpm ? '/min' : undefined}
-            sub={v?.breathing.bpm ? `${Math.round(v.breathing.confidence * 100)}% sure` : 'lie still near a link'}
+            value={camBreath?.bpm ? camBreath.bpm : v?.breathing.bpm ? Math.round(v.breathing.bpm) : '—'}
+            unit={camBreath?.bpm || v?.breathing.bpm ? '/min' : undefined}
+            sub={camBreath?.bpm ? `camera · ${Math.round(camBreath.confidence * 100)}% sure` : v?.breathing.bpm ? `WiFi · ${Math.round(v.breathing.confidence * 100)}% sure` : cam.on ? cam.breath?.why ?? 'measuring…' : 'phone on chest, or start the camera'}
             badge={v?.breathing.experimental ? <span className="pill warn">beta</span> : undefined}
             onOpen={() => setPanel('vitals')}
           />
+
+          <Widget
+            label="Heart rate"
+            icon={<IconHeart />}
+            live={cam.on && Boolean(hrLive?.bpm)}
+            value={cam.on && hrLive?.bpm ? hrLive.bpm : hr ? hr.bpm : '—'}
+            unit={hr || hrLive?.bpm ? 'bpm' : undefined}
+            tone={hr || hrLive?.bpm ? 'danger' : undefined}
+            onOpen={() => setPanel('heart')}
+          >
+            <button
+              className={`btn ${cam.on ? '' : 'btn-primary'}`}
+              style={{ minHeight: 34, padding: '4px 12px', alignSelf: 'flex-start' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                vitals.set({ on: !cam.on, ...(cam.on ? { hr: null } : {}) });
+              }}
+            >
+              {cam.on ? 'Stop' : 'Turn on'}
+            </button>
+          </Widget>
 
           <Widget label="Safety" icon={<IconShield />} value={open.length ? `${open.length} alert${open.length > 1 ? 's' : ''}` : 'All clear'} tone={critical ? 'danger' : open.length ? 'warn' : 'good'} sub={v?.interference ? 'radio noise: paused' : 'falls · stillness · offline'} onOpen={() => setPanel('safety')} />
 
@@ -406,7 +434,7 @@ export function Monitor() {
       {panel === 'vitals' && (
         <Sheet title="Breathing & heart" onClose={() => setPanel(null)}>
           <Row k="Breathing" v={v?.breathing.bpm ? `${Math.round(v.breathing.bpm)} /min` : '—'} hint={v?.breathing.why ?? undefined} />
-          <Row k="Heart rate" v={v?.heart ? `${v.heart} bpm` : '—'} hint={demo ? 'demo values' : 'needs CSI hardware (ESP32-S3)'} />
+          <Row k="Heart rate" v={hr ? `${hr.bpm} bpm` : v?.heart && demo ? `${v.heart} bpm` : '—'} hint={hr ? 'from the webcam' : demo ? 'demo values' : 'WiFi RSSI can’t see a heartbeat: use the webcam widget'} />
           <p className="tiny muted" style={{ marginTop: 10 }}>
             Breathing from signal strength works when you lie or sit still with your chest close to a link (Patwari et al., 2014; UbiBreathe, 2015). FitMax only shows a number when the rhythm is clear, otherwise it says why not. Not a medical device.
           </p>
@@ -482,6 +510,20 @@ export function Monitor() {
             Calibrate empty room
           </button>
           {!demo && config?.hub && <p className="tiny muted" style={{ marginTop: 10 }}>Hub {config.hub}</p>}
+        </Sheet>
+      )}
+      {panel === 'heart' && (
+        <Sheet title="Heart rate & breathing · webcam" onClose={() => setPanel(null)}>
+          <Row k="Heart rate" v={hrLive?.bpm ? `${hrLive.bpm} bpm` : hr ? `${hr.bpm} bpm (last)` : '—'} hint={hrLive?.bpm ? `${Math.round(hrLive.confidence * 100)}% sure · SNR ${hrLive.snr.toFixed(1)} dB` : hrLive?.why ?? (cam.on ? 'starting…' : 'camera off')} />
+          {hrLive?.wave?.length ? <Spark data={hrLive.wave} color="var(--danger)" height={46} fill={false} /> : null}
+          <Row k="Breathing (camera)" v={cam.breath?.bpm ? `${cam.breath.bpm} /min` : '—'} hint={cam.breath?.bpm ? `${Math.round(cam.breath.confidence * 100)}% sure · from your shoulders` : cam.breath?.why ?? 'needs the camera on'} />
+          <Row k="Breathing (WiFi)" v={v?.breathing.bpm ? `${Math.round(v.breathing.bpm)} /min` : '—'} hint={v?.breathing.why ?? 'lie still, phone on your chest'} />
+          <button className={`btn ${cam.on ? '' : 'btn-primary'}`} style={{ marginTop: 12 }} onClick={() => vitals.set({ on: !cam.on, ...(cam.on ? { hr: null } : {}) })}>
+            {cam.on ? 'Stop camera' : 'Turn camera back on'}
+          </button>
+          <p className="tiny muted" style={{ marginTop: 8 }}>
+            Sit about 50 cm away, face lit from the front, shoulders in view. Heart rate = remote photoplethysmography (POS method, Wang et al. 2017): the pulse changes how much light your facial skin absorbs. Breathing = the rise and fall of your shoulders. ±5 bpm at rest; worse with movement or dim light. The camera starts by itself when you open Monitor and keeps measuring in the background on every tab, with no preview window, until you press Stop. Your browser's camera light stays on while it runs. Video never leaves this laptop. Not a medical device.
+          </p>
         </Sheet>
       )}
       {panel === 'how' && <HowSheet caps={v?.capabilities ?? null} onClose={() => setPanel(null)} />}

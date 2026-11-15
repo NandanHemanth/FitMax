@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState, type ReactElement } from 'react';
 import { ThemePicker } from './ui/ThemePicker';
+import { HeartPip } from './vitals/HeartPip';
 import { AppProvider, useApp, type Tab } from './state/app';
 import { Onboarding, SignIn } from './screens/Auth';
 import { Dashboard } from './screens/Dashboard';
@@ -97,6 +98,7 @@ function Shell() {
       </main>
 
       {look && <ThemePicker onClose={() => setLook(false)} />}
+      <HeartPip />
       <nav className="tabbar" aria-label="Main">
         {NAV.map((n) => (
           <button key={n.id} className={tab === n.id ? 'on' : ''} onClick={() => setTab(n.id)} aria-current={tab === n.id ? 'page' : undefined}>

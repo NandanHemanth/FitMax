@@ -537,11 +537,15 @@ class Fusion:
         z = zs[best]
         shifted = any(feats[k]["shift"] > 3.0 for k in live)
         self._zrun.append(z)
-        # moving = clearly above the floor for most of the last second (one blip isn't motion)
-        moving = sum(1 for v in self._zrun if v > 2.4) >= 8 and not self.interference
-        active = moving and sum(1 for v in self._zrun if v > 3.5) >= 6
-        if moving:
+        # moving = above the floor for half of the last second on any link (one blip isn't
+        # motion), or a clear swing on any link (a step through a line moves it 6+ dB)
+        swing = any(feats[k].get("p2p", 0) >= max(6.0, 5.0 * (self.links[k].sd0 or 0.8)) and not feats[k]["sparse"] for k in live)
+        moving_now = (sum(1 for v in self._zrun if v > 2.2) >= 5 or swing) and not self.interference
+        active = moving_now and sum(1 for v in self._zrun if v > 3.5) >= 5
+        if moving_now:
             self.last_motion = now
+        # hold "moving" for 2 s, so the app (asking once a second) never misses a short move
+        moving = not self.interference and now - self.last_motion < 2.0 and self.last_motion > 0
         presence = (now - self.last_motion) < self.inactivity_s or shifted
 
         self._rhythm_step(now, best, moving)
@@ -707,7 +711,7 @@ class Fusion:
             v = list(self.links[k].v)[-int(HZ * 32):]
             if len(v) < HZ * 20 or statistics.pstdev(v) < 0.15:
                 continue
-            sp = spectrum(v, 0.12, 0.6, 0.01)
+            sp = spectrum(v, 0.15, 0.6, 0.01)  # 9-36 br/min; lower is drift, not breath
             mags = [m for _, m in sp]
             s = sum(mags) or 1.0
             prom = max(mags) / (statistics.median(mags) or 1e-9)
@@ -723,6 +727,8 @@ class Fusion:
         med = statistics.median(total.values()) or 1e-9
         prom = peak / med
         conf = max(0.0, min(0.9, (prom - 2.5) / 5.0))
+        if f < 0.17 or f > 0.58:  # a peak on the band edge is leakage from drift or motion
+            conf = min(conf, 0.2)
         self._breath = {"bpm": round(f * 60, 1) if conf >= 0.4 else None, "confidence": round(conf, 2), "links": used, "why": None if conf >= 0.4 else "no clear breathing rhythm"}
 
     # ---------------------------------------------------------- fall (experimental)
@@ -822,8 +828,7 @@ def make_handler(app):
         def do_GET(self):
             path, _, qs = self.path.partition("?")
             path = path.rstrip("/")
-            with app["lock"]:
-                s = dict(fu.state)
+            s = fu.state  # replaced whole each tick, so reading it needs no lock
             fresh = bool(s)
             if path in ("/health", "/health/live", "/health/ready"):
                 return self.send(200, {"status": "ok", "source": "rssi", "version": VERSION, "tick": app["tick"], "links": len(s.get("links", [])), "processing": {"state": "live" if fresh else "stale"}})
@@ -929,17 +934,24 @@ def serve(a):
         nxt = time.time()
         while True:
             now = time.time()
+            # Sample OUTSIDE the lock: `iw` is a subprocess and can take 50+ ms on the board
+            v, ex = (None, {}) if world else wifi.sample()
+            now = time.time()
             with app["lock"]:
                 if world:
                     for (x, y) in world.LINKS:
                         fusion.link(x, y, "ble" if "uno" in (x, y) and "laptop" in (x, y) else "wifi").push(world.rssi((x, y), now - t0), now)
                 else:
-                    v, ex = wifi.sample()
                     fusion.link(a.name, "ap", "wifi").push(v, now, ex)
                 fusion.step(now)
                 app["tick"] += 1
+            # Never try to "catch up" when a tick ran long, and always yield a moment so the
+            # web server gets the lock (a busy loop would starve it and requests would hang)
             nxt += 1 / HZ
-            time.sleep(max(0, nxt - time.time()))
+            now = time.time()
+            if nxt < now:
+                nxt = now
+            time.sleep(max(0.005, nxt - now))
 
     threading.Thread(target=loop, daemon=True).start()
     print(f"FitMax sensing v{VERSION} on :{a.port}  node={a.name} iface={iface} gateway={gw} source={a.source}", flush=True)

@@ -54,6 +54,7 @@ export function Interior() {
   const [q, setQ] = useState('');
   const [wifi, setWifi] = useState(true);
   const [mpKey, setMpKey] = useState<string | null>(null);
+  const [useKey, setUseKey] = useState(true);
   const scene = useRef<SceneHandle>(null);
 
   // CoStar listings (Houston + LA homes on the Matterport capture list)
@@ -385,12 +386,24 @@ export function Interior() {
           <iframe
             className="mp-tour"
             title="Matterport tour"
-            src={`https://my.matterport.com/show/?m=${home.mp}&play=1&qs=1${mpKey ? `&applicationKey=${mpKey}` : ''}`}
+            key={`${home.mp}-${useKey}`}
+            src={`https://my.matterport.com/show/?m=${home.mp}&play=1&qs=1${useKey && mpKey ? `&applicationKey=${mpKey}` : ''}`}
             allow="xr-spatial-tracking; fullscreen"
             allowFullScreen
           />
-          <p className="tiny muted" style={{ marginTop: 8 }}>
-            CoStar captured this home ({home.mp}). Walk it to check the rooms, then design them here. Placing FitMax’s 3D equipment inside the tour itself uses Matterport’s SDK Bundle (Scene API), the next step once the SDK domain is approved.
+          <p className="small" style={{ marginTop: 8 }}>
+            {mpKey && (
+              <button className="linklike" onClick={() => setUseKey((v) => !v)}>
+                {useKey ? 'Try without the SDK key' : 'Try with the SDK key'}
+              </button>
+            )}
+            {' · '}Slow on a hotspot (20–30 s).{' '}
+            <a href={`https://my.matterport.com/show/?m=${home.mp}&play=1${useKey && mpKey ? `&applicationKey=${mpKey}` : ''}`} target="_blank" rel="noreferrer">
+              Open in a new tab
+            </a>
+          </p>
+          <p className="tiny muted" style={{ marginTop: 4 }}>
+            “Model not available” = Matterport won’t serve this scan (off-market, private, or removed): pick another home. CoStar captured this one ({home.mp}). Walk it to check the rooms, then design them here. Placing FitMax’s 3D equipment inside the tour itself uses Matterport’s SDK Bundle (Scene API), the next step once the SDK domain is approved.
           </p>
         </Sheet>
       )}

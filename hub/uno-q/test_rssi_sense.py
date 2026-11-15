@@ -192,3 +192,12 @@ class Http(unittest.TestCase):
         code, rec = self.call("/api/v1/rssi/recent?seconds=5")
         self.assertIn("pc-ap", rec["links"])
         self.assertEqual(rec["labels"][-1]["label"], "squats")
+
+
+class ShortMoves(unittest.TestCase):
+    def test_a_short_move_shows_as_moving_for_at_least_two_seconds(self):
+        # 30 s empty (calibrated), 1.5 s walking, then empty again
+        _, states = run([(30, "empty", None), (31.5, "walk", None), (60, "empty", None)], 59, calibrate_after=25)
+        moving = [i / 10 for i, s in enumerate(states) if s and s["motion_level"] in ("present_moving", "active")]
+        self.assertTrue(moving, "the short move was missed")
+        self.assertGreaterEqual(moving[-1] - moving[0], 1.9)  # held long enough for a 1 Hz poll to see it
