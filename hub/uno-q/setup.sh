@@ -116,11 +116,13 @@ if [[ "$MODE" == rssi ]]; then
   sudo tee /etc/systemd/system/fitmax-rssi.service >/dev/null <<UNIT
 [Unit]
 Description=FitMax RSSI WiFi sensing
-After=network-online.target
+After=network-online.target bluetooth.service
 Wants=network-online.target
 
 [Service]
 EnvironmentFile=/opt/fitmax/rssi.env
+# Bluetooth link for the laptop: turn LE advertising back on at every boot (runs as root, never fails the unit)
+ExecStartPre=-+/bin/sh -c 'command -v btmgmt >/dev/null && { btmgmt power on; btmgmt le on; btmgmt connectable on; btmgmt advertising on; } >/dev/null 2>&1; true'
 ExecStart=/usr/bin/python3 /opt/fitmax/rssi_sense.py serve --port 3000 --name uno
 Restart=always
 User=nobody

@@ -15,6 +15,7 @@ const tone = (s: number) => (s >= 85 ? 'good' : s >= 60 ? 'warn' : 'bad');
 export function Train() {
   const { settings, updateSettings, sets, refreshSets, profile } = useApp();
   const [view, setView] = useState<View>({ name: 'overview' });
+  const [style, setStyle] = useState('gym');
 
   const start = () => {
     unlockVoice();
@@ -45,6 +46,11 @@ export function Train() {
           <h1>Train</h1>
           <p className="muted">Live rep counting, form scoring and voice cues. The camera feed stays on this device.</p>
         </div>
+        <select className="input" style={{ width: 'auto', minWidth: 130, alignSelf: 'flex-start' }} value={style} onChange={(e) => setStyle(e.target.value)} aria-label="Workout type">
+          <option value="gym">Gym</option>
+          <option value="yoga">Yoga</option>
+          <option value="pilates">Pilates</option>
+        </select>
       </div>
       <div className="grid">
         <section className="card hero-card col-7">
